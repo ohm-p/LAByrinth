@@ -1,18 +1,24 @@
-from dlclive import DLCLive, Processor
-import numpy as np
-import serial
-from multiprocessing import Process
-import cv2
+#IMPORTS
 from tkinter import *
 from tkinter import ttk
 import tkinter as tk
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
+
+from dlclive import DLCLive, Processor
+
+import numpy as np
+import serial
+
 from time import time
 from datetime import datetime, date
 from PIL import ImageTk, Image
+import cv2
+
+from multiprocessing import Process
 from threading import Thread
 import sys
+from functools import partial
+
+
 
 class MazeGUI():
     def __init__(self):
@@ -33,6 +39,7 @@ class MazeController(Processor, MazeGUI):
         
         self.dt = datetime.strftime(datetime.now(), "d%y.%m.%d_t%H.%M.%S")
 
+        # self.vid = cv2.VideoCapture(0, cv2.CAP_DSHOW);self.vid.set(cv2.CAP_PROP_FRAME_WIDTH, 782); self.vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 582)
         self.vid = cv2.VideoCapture(0)
         fourcc = cv2.VideoWriter_fourcc(*'mp42')
         self.framerate = float(30)
@@ -91,7 +98,7 @@ class MazeController(Processor, MazeGUI):
         return
     
     def gui_setup(self):
-        stop = ttk.Button(self.gui.frm2, text='exit', command=self.stoptrial)
+        stop = ttk.Button(self.gui.frm2, text='exit', command = partial(self.exit, False, None))
         start= ttk.Button(self.gui.frm2, text='start', command=self.thread_start)
         stop.grid(row=0, column=0);start.grid(row=0, column=1)
         self.buttons['start'] = start; self.buttons['stop'] = stop        
@@ -199,7 +206,7 @@ class MazeController(Processor, MazeGUI):
             self.lbl.config(image = imgtk)
             self.process(pose)
 
-    def stoptrial(self):
+    def stoptrial(self, msg:str or None)->str:
         self.working("stoptrial")
         if self.ser.isOpen():
             for i in self.end_commands:
@@ -209,12 +216,22 @@ class MazeController(Processor, MazeGUI):
         self.gui.root.destroy()
         for thr in self.threads:
             thr.stop()
-        sys.exit('Thanks for using the GUI!')
+        sys.exit(str(msg))
 
         
     #this is just to see if the buttons are working
-    def working(self, button):
+    def working(self, button:str)->str:
         print(f"this button is working: {button}")
+
+    def exit(self, fail:bool, error_str:str or None)->'str':
+        if not fail:
+            error = 'thank you for using the GUI!'
+        elif fail:
+            error = str(error_str)
+        else:
+            error = 'there is an error in the \'error\' function!'
+        self.stoptrial(error)
+
 
 
 # if __name__ == '__main__':
