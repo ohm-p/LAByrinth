@@ -11,16 +11,20 @@ class MazeGui(qw.QMainWindow):
 
         # page = qw.QVBoxLayout()
         self.buttons = qw.QTabWidget()
-        self.buttons.setTabPosition(qw.QTabWidget.West)
-        # self.stack = qw.QStackedLayout()
+  
+        self.stack = qw.QStackedLayout()
 
         for i in range(4):
-            slider = self.stack.addWidget(qw.QSlider(Qt.Orientation.Horizontal))
-            self.buttons.addTab(slider, i)
+            slider = qw.QSlider(Qt.Orientation.Horizontal)
+            self.buttons.addTab(slider, str(i + 1))
 
         widget = qw.QWidget();widget.setLayout(self.stack)
+
+        self.buttons.setTabPosition(qw.QTabWidget.TabPosition.West);self.buttons.setMovable(True);self.buttons.setTabShape(qw.QTabWidget.TabShape.Triangular)
+
         self.setCentralWidget(self.buttons)
-    
+
+
 
 app = qw.QApplication(sys.argv)
 
