@@ -3,33 +3,48 @@ from PyQt6.QtCore import Qt
 from PyQt6 import QtWidgets as qw
 import sys
 
-class MazeGui(qw.QMainWindow):
+class QGB(qw.QGridLayout):
     def __init__(self):
         super().__init__()
+        self.groups = ["video setup", "experiment setup", "controls setup", "execute exp"]
+        self.gboxes = []
+        for i in self.groups:
+            box = qw.QGroupBox(i)
+            layout = qw.QVBoxLayout()
+            box.setLayout(layout)
+            self.gboxes.append(box)
+        for i in range(2):
+            for j in range(2):
+                ind = i + j
+                self.addWidget(self.gboxes[ind], i, j)
+
+class MazeGUI(qw.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('MazeController')
+        self.setGeometry(0,0,1000,1000)
         
-        self.setWindowTitle('MazeGui')
+        self.tabs = qw.QTabWidget
 
-        # page = qw.QVBoxLayout()
-        self.buttons = qw.QTabWidget()
-  
-        self.stack = qw.QStackedLayout()
+        self.tab_names = ['livestream', 'buttons']
 
-        for i in range(4):
-            slider = qw.QSlider(Qt.Orientation.Horizontal)
-            self.buttons.addTab(slider, str(i + 1))
+        self.grid_layout = QGB()
 
-        widget = qw.QWidget();widget.setLayout(self.stack)
+        livestream = qw.QLabel()
+        buttons = qw.QWidget();buttons.setLayout(self.grid_layout)
 
-        self.buttons.setTabPosition(qw.QTabWidget.TabPosition.West);self.buttons.setMovable(True);self.buttons.setTabShape(qw.QTabWidget.TabShape.Triangular)
+        self.tab_dict = {'livestream':livestream, 'buttons':buttons}
 
-        self.setCentralWidget(self.buttons)
+        for i in self.tab_names:
+            self.tabs.addTab(self.tab_dict[i], i)
+        
 
 
 
 app = qw.QApplication(sys.argv)
 
 
-win = MazeGui()
+win = MazeGUI()
 win.show()
 
 app.exec()
