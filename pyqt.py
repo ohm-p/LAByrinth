@@ -211,7 +211,7 @@ class MazeGUI(QWidget):
 
     def setup(self):
         tl = pylon.TlFactory.GetInstance();self.vid.Attach(tl.CreateFirstDevice());self.vid.Open()
-        self.vid.Width.SetValue(455);self.vid.Height.SetValue(455);self.vid.OffsetX.SetValue(77)
+        self.vid.Width.SetValue(455);self.vid.Height.SetValue(455);self.vid.OffsetX.SetValue(71)
         
         # self.vid.UserSetSelector.SetValue(pylon.UserSetSelector_AutoFunctions)
 
