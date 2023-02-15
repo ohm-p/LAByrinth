@@ -1,12 +1,15 @@
-from PyQt6.QtCore import QDateTime, Qt, QTimer, QRegularExpression
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
-        QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-        QProgressBar, QPushButton, QRadioButton, QScrollBar, QSizePolicy,
-        QSlider, QSpinBox, QStyleFactory, QTableWidget, QTabWidget, QTextEdit,
-        QVBoxLayout, QWidget, QMainWindow)
-from PyQt6.QtGui import QImage, QPixmap, QIntValidator
-from PyQt6 import QtCore, QtGui, QtWidgets
-import sys
+# from PyQt6.QtCore import QDateTime, Qt, QTimer, QRegularExpression
+# from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDateTimeEdit,
+#         QDial, QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+#         QProgressBar, QPushButton, QRadioButton, QScrollBar, QSizePolicy,
+#         QSlider, QSpinBox, QStyleFactory, QTableWidget, QTabWidget, QTextEdit,
+#         QVBoxLayout, QWidget, QMainWindow)
+# from PyQt6.QtGui import QImage, QPixmap, QIntValidator
+# from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import *
+from PyQt6.QtWidgets import *
+from PyQt6.QtGui import *
+import sys;import os
 from pypylon import pylon, genicam
 import cv2
 import numpy as np
@@ -90,7 +93,7 @@ class QGB(QGridLayout):
         self.push_vschanges = QPushButton(text = f'Push \'{self.groups[0]}\' Changes?')
         #experiment setup 
         self.change_filepath = QPushButton(text = 'click here to select filepath')
-        self.filepath = QLabel(text = 'please select filepath (none selected)')
+        self.path_label = QLabel(text = 'please select filepath (none selected)')
         self.push_eschanges = QPushButton(text = f'Push \'{self.groups[1]}\' Changes?')
         #controls setup
         self.push_cschanges = QPushButton(text = f'Push \'{self.groups[2]}\' Changes?')
@@ -121,7 +124,7 @@ class QGB(QGridLayout):
     def es_layout(self):
         es_layout = QVBoxLayout()
 
-        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.filepath);es_layout.addWidget(self.push_eschanges)
+        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges)
         return es_layout
     
 
@@ -197,6 +200,10 @@ class MazeGUI(QWidget):
         self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
         self.setLayout(self.main_layout)
 
+        self.wdir = os.path.dirname(os.path.realpath(__file__))
+        self.grid.change_filepath.clicked.connect(self.pathprompt)
+        
+
 
 
     def button_setup(self):
@@ -229,6 +236,15 @@ class MazeGUI(QWidget):
             s, s = frm.shape
             img = QImage(frm.data, s, s, QImage.Format.Format_Mono)
             cv2.imshow('live video', frm)
+
+    def pathprompt(self):
+        options = QFileDialog.Option.ShowDirsOnly
+        dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
+        file = dlg.getOpenFileName(caption='select the working directory for your project');fname = file[0]
+        self.wdir = fname
+        msg = f'the working directory is: \"{str(fname)}\"'
+        self.grid.path_label.setText(msg)
+
             
 
 
