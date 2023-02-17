@@ -1,12 +1,66 @@
-from PyQt6.QtCore import *
-from PyQt6.QtWidgets import *
-from PyQt6.QtGui import *
-import sys;import os
-from pypylon import pylon, genicam
-import cv2
+from dlclive import DLCLive, Processor
 import numpy as np
-import json
+import serial, cv2, sys, os, json, pickle
+from pypylon import pylon, genicam
+import time
+from datetime import datetime, date 
+
+from multiprocessing import Process
+from threading import Thread
+
+from PyQt6.QtWidgets import *
+from PyQt6.QtGui import QImage, QPixmap, QAction, QKeySequence
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from qt_material import apply_stylesheet
+
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+
+class Gui_updater(QThread):
+    update_image = pyqtSignal(np.ndarray)
+    def __init__(self):
+        super().__init__()
+        self._gui_run_flag = True
+        self.vid = pylon.InstantCamera()
+        with open('settings.json', 'r') as json_settings:
+            settings = json.load(json_settings)
+        self.settings = settings['camera']
+        
+
+    def grab_single_image(self):
+        self.setup()
+        grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
+        if grab.GrabSucceeded():
+            frame = grab.GetArray()
+            QFrame = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
+            self.update_image.emit(frame)
+        self.vid.Close()
+
+    def run(self):
+        self.setup()
+        while self._gui_run_flag:
+            grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
+            if grab.GrabSucceeded():
+                frame = grab.GetArray()
+                Qframe = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
+                pixmap = QPixmap.fromImage(Qframe)
+                #Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
+                #pixmap = QPixmap.fromImage(Qframe)
+                self.update_image.emit(frame)
+        self.vid.Close()
+    
+    def setup(self):
+        w, h, ox, oy = self.settings.values()
+        tl = pylon.TlFactory.GetInstance();self.vid.Attach(tl.CreateFirstDevice());self.vid.Open()
+        self.vid.Width.SetValue(w);self.vid.Height.SetValue(h);self.vid.OffsetX.SetValue(ox);self.vid.OffsetX.SetValue(oy)
+        
+        # self.vid.UserSetSelector.SetValue(pylon.UserSetSelector_AutoFunctions)
+
+        self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+
+    def stop(self):
+        self._gui_run_flag=False
+        self.wait()
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -67,15 +121,11 @@ class vslider(QWidget):
         self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt);self.layout.addWidget(self.sl)
         self.setLayout(self.layout)
 
-
     def slider_updates_text(self):
         self.txt.setText(f'{self.sl.sliderPosition()}')
 
-
-
     def text_updates_slider(self):
         self.sl.setSliderPosition(int(self.txt.text()))    
-
 
 class QGB(QGridLayout):
     def __init__(self):
@@ -101,7 +151,6 @@ class QGB(QGridLayout):
         self.gboxes = [self.gbox(i) for i in range(4)]
 
 
-
     def vs_layout(self):
         vs_layout = QVBoxLayout()
         
@@ -114,13 +163,11 @@ class QGB(QGridLayout):
         vs_layout.addWidget(Xdim_vid);vs_layout.addWidget(Ydim_vid);vs_layout.addWidget(self.vspacer);vs_layout.addWidget(Xpos_vid);vs_layout.addWidget(Ypos_vid);vs_layout.addWidget(self.push_vschanges)
         return vs_layout
     
-
     def es_layout(self):
         es_layout = QVBoxLayout()
 
         es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges)
         return es_layout
-    
 
     def cs_layout(self):
         cs_layout = QVBoxLayout()
@@ -131,7 +178,6 @@ class QGB(QGridLayout):
 
         cs_layout.addWidget(shock_setup);cs_layout.addWidget(rotation_setup);cs_layout.addWidget(self.push_eschanges)
         return cs_layout
-
      
     def ee_layout(self):
         ee_layout = QVBoxLayout()
@@ -159,12 +205,7 @@ class QGB(QGridLayout):
         ##insert other func here
         return box
 
-
-
-
-
-
-class MazeGUI(QWidget):
+class Maze_Controller(QWidget):
     def __init__(self):
         super().__init__()
         if not os.path.exists('./settings.json'):
@@ -216,8 +257,6 @@ class MazeGUI(QWidget):
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
         self.grid.change_filepath.clicked.connect(self.pathprompt)
-        
-
 
 
     def button_setup(self):
@@ -227,27 +266,26 @@ class MazeGUI(QWidget):
         self.grid.start.clicked.connect()
         self.grid.stop.clicked.connect()
         self.grid.change_filepath.clicked.connect()
-        
-    def setup(self):
-        tl = pylon.TlFactory.GetInstance();self.vid.Attach(tl.CreateFirstDevice());self.vid.Open()
-        self.vid.Width.SetValue(455);self.vid.Height.SetValue(455);self.vid.OffsetX.SetValue(71)
-        
-        # self.vid.UserSetSelector.SetValue(pylon.UserSetSelector_AutoFunctions)
 
-        self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+    def main_processing(self):
+        #get Qthreadpool to keep gui up to date
+        self.gui_thread = Gui_updater()
+        self.gui_thread.update_image.connect(self.gui_update)
+        self.gui_thread.start()
 
-    def main(self):
-        grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
-        while True:
-            if grab.GrabSucceeded():
-                frm = grab.GetArray()
-            else:
-                sys.exit('cam failed')
-                break
-
-            s, s = frm.shape
-            img = QImage(frm.data, s, s, QImage.Format.Format_Mono)
-            cv2.imshow('live video', frm)
+    def shutdown_routine(self):
+        print("Shutdown Routine Activated")
+        #add all shutdown commands here
+        self.gui_thread.stop()
+        self.close()
+        return
+    
+    @pyqtSlot(np.ndarray)
+    def gui_update(self, Qframe):
+        Qframe = cv2.cvtColor(Qframe, cv2.COLOR_BGR2RGB)
+        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(Qframe)
+        self.display_camera.setPixmap(pixmap)
 
     def pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
@@ -256,18 +294,15 @@ class MazeGUI(QWidget):
         self.wdir = fname
         msg = f'the working directory is: \"{str(fname)}\"'
         self.grid.path_label.setText(msg)
-
-            
-
-
-QApplication.setStyle(QStyleFactory.create('fusion'))
-app =  QApplication(sys.argv)
+    
+    def calculation(self, dlc):
+        time.sleep(1)
+        return
 
 
-win = MazeGUI()
-# win.main()
-win.show()
 
-app.exec()
-
-
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    Maze = Maze_Controller()
+    Maze.show()
+    app.exec()
