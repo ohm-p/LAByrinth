@@ -2,7 +2,7 @@ from dlclive import DLCLive, Processor
 import numpy as np
 import serial, cv2, sys, os, json, pickle
 import time
-from datetime import datetime, date
+from datetime import datetime, date 
 
 from multiprocessing import Process
 from threading import Thread
@@ -22,6 +22,10 @@ class Gui_updater(QThread):
         super().__init__()
         self._gui_run_flag = True
     
+
+    def grab_single_image(self):
+
+
     def run(self):
         raw_video = cv2.VideoCapture(0)
         while self._gui_run_flag:
@@ -55,12 +59,12 @@ class Maze_Controller(QWidget):
             #stop and start, 0x00 or 0x01 Type 0x04
 
             #0xaa, 0xbb, Type(0x01-0x04), Value(varies), Check sum (d2+d3+d4)&0xff, 0xcc, 0xdd
-            self.settings = {
-                'rpm': 4,
-                'direction': 0,
-                'current': .1,
+
                 #add a way to store shapes in json file
-            }
+            # }
+            with open('default_settings.json', 'r') as default_settings:
+                self.settings = json.load(default_settings)
+            #loads the settings from the default file and saves them to a new settings file since there is none
             with open('settings.json', 'w') as outfile:
                 json.dump(self.settings, outfile)
         else:
@@ -75,7 +79,7 @@ class Maze_Controller(QWidget):
         self.showFullScreen()
 
         # Now use a qt_material to switch to dark colors:
-        apply_stylesheet(app, theme='dark_lightgreen.xml')
+        apply_stylesheet(app, theme='dark_cyan.xml')
 
         #set shorcut for closing window to Esc sends code directly to shutdown_routine
         self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.shutdown_routine)
