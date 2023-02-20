@@ -9,8 +9,8 @@ from multiprocessing import Process
 from threading import Thread
 
 from PyQt6.QtWidgets import *
-from PyQt6.QtGui import QImage, QPixmap, QAction, QKeySequence
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import *
+from PyQt6.QtCore import *
 from qt_material import apply_stylesheet
 
 import matplotlib.pyplot as plt
@@ -33,6 +33,7 @@ class Gui_updater(QThread):
         if grab.GrabSucceeded():
             frame = grab.GetArray()
             QFrame = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
+            pixmap = QPixmap.fromImage(QFrame)
             self.update_image.emit(frame)
         self.vid.Close()
 
@@ -224,7 +225,7 @@ class Maze_Controller(QWidget):
 
         # self.windowTitle('MazeController')
         self.showFullScreen()
-        self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.close)
+        self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.shutdown_routine)
         self.addAction(self.exit)
         apply_stylesheet(app, theme='dark_cyan.xml')
 
@@ -263,9 +264,9 @@ class Maze_Controller(QWidget):
         self.grid.push_vschanges.clicked.connect()
         self.grid.push_eschanges.clicked.connect()
         self.grid.push_vschanges.clicked.connect()
-        self.grid.start.clicked.connect()
-        self.grid.stop.clicked.connect()
-        self.grid.change_filepath.clicked.connect()
+        self.grid.start.clicked.connect(self.main_processing)
+        self.grid.stop.clicked.connect(self.shutdown_routine)
+        self.grid.change_filepath.clicked.connect(self.pathprompt)
 
     def main_processing(self):
         #get Qthreadpool to keep gui up to date
@@ -282,10 +283,15 @@ class Maze_Controller(QWidget):
     
     @pyqtSlot(np.ndarray)
     def gui_update(self, Qframe):
-        Qframe = cv2.cvtColor(Qframe, cv2.COLOR_BGR2RGB)
-        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
+        # Qframe = cv2.cvtColor(Qframe, cv2.COLOR_BGR2RGB)
+        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_Grayscale8)
         pixmap = QPixmap.fromImage(Qframe)
         self.display_camera.setPixmap(pixmap)
+
+    def gui_preview(self, Qframe):
+        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_Grayscale8)
+        temp_pix = QPixmap.fromImage(Qframe)
+        self.display_camera.setPixmap(temp_pix)
 
     def pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
@@ -306,3 +312,4 @@ if __name__ == '__main__':
     Maze = Maze_Controller()
     Maze.show()
     app.exec()
+    
