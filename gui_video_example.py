@@ -1,6 +1,6 @@
-from dlclive import DLCLive, Processor
+# from dlclive import DLCLive, Processor
 import numpy as np
-import serial, cv2, sys, os, json, pickle
+import serial, cv2, sys, os, json, qt_material, imageio
 import time
 from datetime import datetime, date 
 
@@ -8,38 +8,45 @@ from multiprocessing import Process
 from threading import Thread
 
 from PyQt6.QtWidgets import *
-from PyQt6.QtGui import QImage, QPixmap, QAction, QKeySequence
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import *
+from PyQt6.QtCore import *
 from qt_material import apply_stylesheet
 
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
 class Gui_updater(QThread):
     update_image = pyqtSignal(np.ndarray)
 
+
     def __init__(self):
         super().__init__()
-        self._gui_run_flag = True
-    
+        path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
+        self.dt = datetime.strftime(datetime.now(), "d%y.%m.%d_t%H.%M")
+        fourcc = cv2.VideoWriter_fourcc(*'MP4V');fps = 30;frameSize = (1290, 720)
+        self.vid_path = path +  self.dt + "_recording.mp4"
+        self._gui_run_flag = False
+        
 
     def grab_single_image(self):
-
+        vid = cv2.VideoCapture(0)
+        retrieved, frame = vid.read()
+        if retrieved:
+            self.update_image.emit(frame)
+            vid.release()
 
     def run(self):
-        raw_video = cv2.VideoCapture(0)
+        self._gui_run_flag = True
+        vid = cv2.VideoCapture(0)
         while self._gui_run_flag:
-            retrieved, frame = raw_video.read()
+            retrieved, frame = vid.read()
             if retrieved:
-                Qframe = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                #Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
-                #pixmap = QPixmap.fromImage(Qframe)
                 self.update_image.emit(frame)
-        raw_video.release()
-
+                rgb_frame = np.column_stack((frame, frame, frame)) 
+            imageio.imwrite(self.vid_path, rgb_frame, format = 'FFMPEG')
+        vid.release()
     def stop(self):
         self._gui_run_flag=False
         self.wait()
+
 
 
 class Maze_Controller(QWidget):
@@ -68,7 +75,7 @@ class Maze_Controller(QWidget):
             with open('settings.json', 'w') as outfile:
                 json.dump(self.settings, outfile)
         else:
-            print('Found setttings file')
+            print('found settings file')
             with open('settings.json', 'r') as json_settings:
                 self.settings = json.load(json_settings)
 
@@ -93,7 +100,9 @@ class Maze_Controller(QWidget):
         self.instances_table.setRowCount(1)
         self.instances_table.setColumnCount(3)
         self.instances_table.setHorizontalHeaderLabels(['Shock Type', 'Start Angle', 'Total Angle'])
-        self.button = QPushButton('Start')
+        self.start_button = QPushButton('Start');self.start_button.clicked.connect(self.main_processing)
+        self.stop_button = QPushButton('Stop');self.stop_button.clicked.connect(self.shutdown_routine)
+        self.preview_button = QPushButton('Preview');self.preview_button.clicked.connect(self.preview)
 
         #setup orgin points and sliders
         origin = QLabel("Origin: ")
@@ -104,19 +113,24 @@ class Maze_Controller(QWidget):
         #main_layout.addWidget(self.instances_table,0,1,2,0)
         
         layout1 = QVBoxLayout()
-        layout1.addWidget(self.instances_table)
-        layout1.addWidget(self.button)
+        # layout1.addWidget(self.instances_table)
+        layout1.addWidget(self.start_button);layout1.addWidget(self.stop_button);layout1.addWidget(self.preview_button)
         main_layout.addLayout(layout1, 0,3,6,1)
 
 
-
         self.setLayout(main_layout)
-        self.main_processing()
+        self.gui_thread = Gui_updater()
+        # self.main_processing()
+
 
 
     def main_processing(self):
         #get Qthreadpool to keep gui up to date
-        self.gui_thread = Gui_updater()
+        
+        self.gui_thread.update_image.connect(self.gui_update)
+        self.gui_thread.start()
+
+    def preview(self):
         self.gui_thread.update_image.connect(self.gui_update)
         self.gui_thread.start()
 
@@ -126,7 +140,8 @@ class Maze_Controller(QWidget):
         self.gui_thread.stop()
         self.close()
         return
-    
+
+
     @pyqtSlot(np.ndarray)
     def gui_update(self, Qframe):
         Qframe = cv2.cvtColor(Qframe, cv2.COLOR_BGR2RGB)

@@ -9,12 +9,10 @@ from multiprocessing import Process
 from threading import Thread
 
 from PyQt6.QtWidgets import *
-from PyQt6.QtGui import QImage, QPixmap, QAction, QKeySequence
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import *
+from PyQt6.QtCore import *
 from qt_material import apply_stylesheet
 
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
 class Gui_updater(QThread):
     update_image = pyqtSignal(np.ndarray)
@@ -32,8 +30,7 @@ class Gui_updater(QThread):
         grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
         if grab.GrabSucceeded():
             frame = grab.GetArray()
-            QFrame = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
-            self.update_image.emit(frame)
+            self.process_frame(frame)
         self.vid.Close()
 
     def run(self):
@@ -42,11 +39,7 @@ class Gui_updater(QThread):
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
                 frame = grab.GetArray()
-                Qframe = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
-                pixmap = QPixmap.fromImage(Qframe)
-                #Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
-                #pixmap = QPixmap.fromImage(Qframe)
-                self.update_image.emit(frame)
+                self.process_frame(frame)
         self.vid.Close()
     
     def setup(self):
@@ -57,6 +50,11 @@ class Gui_updater(QThread):
         # self.vid.UserSetSelector.SetValue(pylon.UserSetSelector_AutoFunctions)
 
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+
+    def process_frame(self, frame):
+        qframe = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format.Format_Grayscale8)
+        pixmap = QPixmap.fromImage(qframe)
+        self.update_image.emit(pixmap)
 
     def stop(self):
         self._gui_run_flag=False
