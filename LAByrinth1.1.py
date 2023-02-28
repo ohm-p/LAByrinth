@@ -1,7 +1,7 @@
-# from dlclive import DLCLive, Processor
+from dlclive import DLCLive, Processor
 import numpy as np
 import serial, cv2, sys, os, json, pickle
-# from pypylon import pylon, genicam
+from pypylon import pylon, genicam
 import time
 from datetime import datetime, date 
 
@@ -40,7 +40,7 @@ class processor(QObject):
         fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (1290, 720)
         vid_path = path +  self.dt + "_recording.avi"
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
-        self.vid = pylon.InstantCamera();self.setup(self.settings)
+        self.setup()
 
         self.commands = [[0x01, 1], #1: rotation setup: default counter clockwise, 4-100rpm
         [0x02, 0x01], #2: rotate, 0x01 to start
@@ -53,6 +53,8 @@ class processor(QObject):
         self.dlc_processor = Processor()
         self.dlc_live = DLCLive(self.model_path)
         self.marker_dims = (7,7)
+
+        self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
         
 
 
@@ -60,7 +62,8 @@ class processor(QObject):
         self.setup()
         grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
         if grab.GrabSucceeded():
-            frame = grab.GetArray()
+            frame = grab.Array
+            mod_frame = self.process(frame)
             self.frm.emit(mod_frame)
         else:
             sys.exit('cam failed to cap frame')
@@ -73,7 +76,7 @@ class processor(QObject):
         while self._run_flag:
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
-                frame = grab.GetArray()
+                frame = grab.Array
                 mod_frame = self.process(frame)
                 self.frm.emit(mod_frame)
             else:
@@ -89,13 +92,10 @@ class processor(QObject):
 
     def setup(self):
         h, w, x_off, y_off, x_cen, y_cen = self.settings['camera'].values()
-        if self.vid.isOpen():
-            self.vid.Close()
-        tl = pylon.TlFactory.GetInstance();self.vid.Attach(tl.CreateFirstDevice())
+        self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(w);self.vid.Height.SetValue(h)
         self.vid.OffsetX.SetValue(x_off);self.vid.OffsetY.SetValue(y_off)
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-        self.vid.Open()
 
     def process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
@@ -292,56 +292,50 @@ class QGB(QGridLayout):
 class Maze_Controller(QWidget,QObject):
     def __init__(self):
         super().__init__()
-        def load_settings():
-            if not os.path.exists('./settings.json'):
-                print('Missing settings file ... Loading defaults')
-                with open('default_settings.json', 'r') as default_settings:
-                    self.settings = json.load(default_settings)
-                #loads the settings from the default file and saves them to a new settings file since there is none
-                with open('settings.json', 'w') as outfile:
-                    json.dump(self.settings, outfile)
-            else:
-                print('Found settings file')
-                with open('settings.json', 'r') as json_settings:
-                    self.settings = json.load(json_settings)
-        load_settings()
-        # self.vid = pylon.InstantCamera();self.setup()
-        # self.conv = pylon.ImageFormatConverter()
+        if not os.path.exists('./settings.json'):
+            print('Missing settings file ... Loading defaults')
+            with open('default_settings.json', 'r') as default_settings:
+                self.settings = json.load(default_settings)
+            #loads the settings from the default file and saves them to a new settings file since there is none
+            with open('settings.json', 'w') as outfile:
+                json.dump(self.settings, outfile)
+        else:
+            print('Found settings file')
+            with open('settings.json', 'r') as json_settings:
+                self.settings = json.load(json_settings)
+    # self.vid = pylon.InstantCamera();self.setup()
+    # self.conv = pylon.ImageFormatConverter()
 
-        def win_setup():
-            self.windowTitle('MazeController')
-            self.showFullScreen()
-            self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.shutdown_routine)
-            self.addAction(self.exit)
-            apply_stylesheet(app, theme='dark_cyan.xml')
-        win_setup()
-        
-        def layout_setup():
-            self.tabs = QTabWidget()
-            self.tab_names = ['livestream', 'buttons']
-            livestream_layout = QVBoxLayout()
-            livestream_widget = QWidget()
-            self.livestream_lbl =  QLabel()
-            self.livestream_lbl.setFixedWidth(self.settings['camera']['width']);self.livestream_lbl.setFixedHeight(self.settings['camera']['height'])
-            self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
-            self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-            livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
-            livestream = QWidget();livestream.setLayout(livestream_layout)
-            self.grid = QGB()
-            buttons =  QWidget();buttons.setLayout(self.grid)
-            self.tab_dict = {'livestream':self.livestream, 'buttons':self.buttons}
-            for i in self.tab_names:
-                self.tabs.addTab(self.tab_dict[i], i)
-            self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
-            self.setLayout(self.main_layout)
-        layout_setup()
-        
+        self.setWindowTitle('MazeController')
+        self.showFullScreen()
+        self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.shutdown_routine)
+        self.addAction(self.exit)
+        apply_stylesheet(app, theme='dark_cyan.xml')
+        self.tabs = QTabWidget()
+        self.tab_names = ['livestream', 'buttons']
+        livestream_layout = QVBoxLayout()
+        livestream_widget = QWidget()
+        self.livestream_lbl =  QLabel()
+        self.livestream_lbl.setFixedWidth(self.settings['camera']['width']);self.livestream_lbl.setFixedHeight(self.settings['camera']['height'])
+        self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
+        self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
+        livestream = QWidget();livestream.setLayout(livestream_layout)
+        self.grid = QGB()
+        buttons =  QWidget();buttons.setLayout(self.grid)
+        self.tab_dict = {'livestream':livestream, 'buttons':buttons}
+        for i in self.tab_names:
+            self.tabs.addTab(self.tab_dict[i], i)
+        self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
+        self.setLayout(self.main_layout)
+    
         # self.tabs.addTab(self.livestream, 'livestream')
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
         self.grid.change_filepath.clicked.connect(self.pathprompt)
-
-        self.processor = processor()
+    
+        model_path = self.model_pathprompt()
+        self.processor = processor(model_path = model_path)
         self.preview_thread = QThread()
         self.stream_thread = QThread()
 
@@ -362,6 +356,12 @@ class Maze_Controller(QWidget,QObject):
         msg = f'the working directory is: \"{str(fname)}\"'
         self.grid.path_label.setText(msg)
 
+    def model_pathprompt(self):
+        model_options = QFileDialog.Option.ShowDirsOnly
+        model_dlg = QFileDialog();model_dlg.setOptions(model_options);model_dlg.setFileMode(QFileDialog.FileMode.Directory)
+        model_path = model_dlg.getExistingDirectory(caption='select the directory of the exported model that you will be using')
+        return model_path
+
     def main_processing(self):
         #get Qthreadpool to keep gui up to date       
         self.processor.moveToThread(self.stream_thread)
@@ -375,7 +375,7 @@ class Maze_Controller(QWidget,QObject):
 
     def shutdown_routine(self):
         #add all shutdown commands here
-        self.processor.vid.release()
+        self.processor.vid.Close()
         self.processor.out.release()
         self.stream_thread.exit();self.preview_thread.exit()
         self.close()
