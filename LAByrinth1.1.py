@@ -30,15 +30,15 @@ class settings():
         self._open_flag_ = False
 
     def pull(self, inds:tuple):
-        if inds.size == 1:
-            i = inds
+        if len(inds) == 1:
+            i, = inds
             return self.settings[i]
-        elif inds.size == 2:
-            i, j = inds
+        elif len(inds) == 2:
+            i, j, = inds
             return self.settings[i][j]
         else:
             print('you attempted to pull settings that don\'t exist')
-            return self.settings()
+            return self.settings
 
     def push_c(self, values:list):
         if values.size == len(self.settings['camera']):
@@ -100,7 +100,7 @@ class processor(QObject):
 
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
-        self.center = (self.settings.pull(('camera', 'x_center')), self.settings.pull(('camera', 'y_center')))
+        self.center = (self.settings.pull(('camera', 'x_center',)), self.settings.pull(('camera', 'y_center',)))
         
 
     def grab_single(self):
@@ -132,11 +132,11 @@ class processor(QObject):
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera')).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
         self.setup()
 
     def setup(self):
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera')).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
@@ -289,19 +289,19 @@ class QGB(QGridLayout):
         #experiment execution
         self.start = QPushButton(text = 'Start Experiment')
         self.stop = QPushButton(text = 'Stop Experiment')
+        self.savesettings = QPushButton(text = 'save current settings to \'settings.json\'')
 
         #vertical spacer box for any vertical spacing, with height 25
         self.vspacer = QWidget();self.vspacer.setFixedHeight(25)
 
         self.gboxes = [self.gbox(i) for i in range(4)]
 
-        self.savesettings = QPushButton(text = 'save current settings to \'settings.json\'')
-#######################################################################################################
+ #######################################################################################################
 
 
     def vs_layout(self):
         vs_layout = QVBoxLayout()
-        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('camera')).values()
+        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('camera',)).values()
 
         self.Xdim_vid = hslider('X dim:', 0, 711, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
@@ -335,7 +335,7 @@ class QGB(QGridLayout):
     def ee_layout(self):
         ee_layout = QVBoxLayout()
 
-        ee_layout.addWidget(self.start);ee_layout.addWidget(self.stop)
+        ee_layout.addWidget(self.start);ee_layout.addWidget(self.stop);ee_layout.addWidget(self.savesettings)
         return ee_layout
     
     def gbox(self, ind):
@@ -378,7 +378,7 @@ class Maze_Controller(QWidget,QObject):
         livestream_layout = QVBoxLayout()
         livestream_widget = QWidget()
         self.livestream_lbl =  QLabel()
-        self.livestream_lbl.setFixedWidth(self.settings.pull(('camera','width')));self.livestream_lbl.setFixedHeight(self.settings.pull(('camera','height')))
+        self.livestream_lbl.setFixedWidth(self.settings.pull(('camera','width',)));self.livestream_lbl.setFixedHeight(self.settings.pull(('camera','height',)))
         self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
         self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
@@ -430,10 +430,13 @@ class Maze_Controller(QWidget,QObject):
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
         self.stream_thread.start()
+        self.push_controlssetup_changes()
+        self.processor.command(2)
+
 
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
-        self.preview_thread.started.connect(self.processor.grab_single  )
+        self.preview_thread.started.connect(self.processor.grab_single)
         self.preview_thread.start()
 
     def shutdown_routine(self):
@@ -441,11 +444,8 @@ class Maze_Controller(QWidget,QObject):
         self.processor.vid.Close()
         self.processor.out.release()
         self.stream_thread.exit();self.preview_thread.exit()
-        self.close()
-
-        print("Shutdown Routine Activated")
-        return
-    
+        # self.close()
+        sys.exit('shutdown routine activated')    
     
 
     @pyqtSlot(np.ndarray)
@@ -461,6 +461,7 @@ class Maze_Controller(QWidget,QObject):
 
     def push_controlssetup_changes(self):
         a, b = self.grid.shock_setup.value(), self.grid.rotation_setup.value()
+        self.processor.shockandrotation_setup(a, b)
         self.settings.push_c((a, b))
 
 
