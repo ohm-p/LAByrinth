@@ -13,19 +13,12 @@ from PyQt6.QtGui import *
 from PyQt6.QtCore import *
 from qt_material import apply_stylesheet
 
-class processor(QObject):
-    frm = pyqtSignal(np.ndarray)
-    
-    def __init__(self, model_path):
-        super().__init__()
-        if os.path.exists(model_path):
-            self.model_path = model_path
-        else:
-            sys.exit('error selecting the correct model.')
-
+class settings():
+    sig = pyqtSignal()
+    def __init__(self):
         if not os.path.exists('./settings.json'):
             print('Missing settings file ... Loading defaults')
-            with open('default_settings.json', 'r') as default_settings:
+            with open('defaults.json', 'r') as default_settings:
                 self.settings = json.load(default_settings)
             #loads the settings from the default file and saves them to a new settings file since there is none
             with open('settings.json', 'w') as outfile:
@@ -34,6 +27,57 @@ class processor(QObject):
             print('Found settings file')
             with open('settings.json', 'r') as json_settings:
                 self.settings = json.load(json_settings)
+        self._open_flag_ = False
+
+    def pull(self, inds:tuple):
+        if inds.size == 1:
+            i = inds
+            return self.settings[i]
+        elif inds.size == 2:
+            i, j = inds
+            return self.settings[i][j]
+        else:
+            print('you attempted to pull settings that don\'t exist')
+            return self.settings()
+
+    def push_c(self, values:list):
+        if values.size == len(self.settings['camera']):
+            self.settings['camera'] = dict([(list(self.settings['camera'].keys())[i], values[i]) for i in range(len(self.settings['camera']))])
+        else:
+            sys.exit('attempted passing settings of incorrect size')
+
+    def push_v(self, values:list):
+        if values.size == len(self.settings['experiment']):
+            self.settings['experiment'] = dict([(list(self.settings['experiment'].keys())[i], values[i]) for i in range(len(self.settings['experiment']))])
+        else:
+            sys.exit('attempted passing settings of incorrect size')
+
+    def save_settings_func(self):
+        if not self._open_flag_:
+            if os.path.exists('./settings.json'):
+                with open('settings.json', 'w') as outfile:
+                    json.dump(self.settings, outfile)
+                    print('changed current settings file')
+            else:
+                with open('settings.json', 'w') as outfile:
+                    json.dump(self.settings, outfile)
+                    print('no \'settings.json\' exists. new file created and settings saved')
+            self._open_flag_ = True
+        else:
+            sys.exit('trying to write to the same \'settings.json\' file in multiple statements')
+        
+
+class processor(QObject):
+    frm = pyqtSignal(np.ndarray)
+    
+    def __init__(self, model_path, settings):
+        super().__init__()
+        if os.path.exists(model_path):
+            self.model_path = model_path
+        else:
+            sys.exit('error selecting the correct model.')
+
+        self.settings = settings
         self._run_flag = False
         path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
         self.dt = datetime.strftime(datetime.now(), "d%y.%m.%d_t%H.%M")
@@ -42,10 +86,10 @@ class processor(QObject):
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.setup()
 
-        self.commands = [[0x01, 1], #1: rotation setup: default counter clockwise, 4-100rpm
+        self.commands = [[0x01, None], #1: rotation setup: default counter clockwise, 4-100rpm
         [0x02, 0x01], #2: rotate, 0x01 to start
         [0x02, 0x00], #3: rotate, 0x00 to stop
-        [0x03, 5], #4: shock current, (1-40)/10 mA (enter an integer)
+        [0x03, None], #4: shock current, (1-40)/10 mA (enter an integer)
         [0x04, 0x01], #5: shock, 0x01 to start
         [0x04, 0x00]] #6: shock, 0x00 to stop
 
@@ -55,8 +99,9 @@ class processor(QObject):
         self.marker_dims = (7,7)
 
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
+        self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
+        self.center = (self.settings.pull(('camera', 'x_center')), self.settings.pull(('camera', 'y_center')))
         
-
 
     def grab_single(self):
         self.setup()
@@ -86,26 +131,16 @@ class processor(QObject):
         self.vid.Close()
 
     def change_settings(self, new_settings):
-        self.settings = new_settings
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings['camera'].values()
+        self.settings.settings = new_settings
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera')).values()
         self.setup()
 
     def setup(self):
-        h, w, x_off, y_off, x_cen, y_cen = self.settings['camera'].values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera')).values()
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
-        self.vid.Width.SetValue(w);self.vid.Height.SetValue(h)
-        self.vid.OffsetX.SetValue(x_off);self.vid.OffsetY.SetValue(y_off)
+        self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
+        self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-
-    def process(self, frame):
-        pose = self.dlc_live.get_pose(frame) 
-        mod_frame = frame.copy()
-        for i in range(3):
-            coords = (int(pose[i, 0]), int(pose[i, 1]))
-            cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
-
-
-        return mod_frame
     
     def process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
@@ -113,6 +148,7 @@ class processor(QObject):
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+        cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
         if(self.in_sector(pose[0,0], pose[0,1])
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
@@ -142,7 +178,31 @@ class processor(QObject):
         if (theta < 30 and theta > -30):
             #boolean output for the shock function
             return True
+        
+    # simplified command function, see previous version for legacy (eliminated 5 other commands and simplified process)
+    def command(self, inp):
+         d2, d3 = self.commands[inp - 1]
+         d0 = 0xaa
+         d1 = 0xbb
+         d4 = 0x00
+         d5 = (d2 + d3 + d4) & 0xff
+         d6 = 0xcc
+         d7 = 0xdd 
+         
+         #creates a list that will be converted to a byte array
+         l = [d0, d1, d2, d3, d4, d5, d6, d7]
+         
+         return bytearray(l)
     
+    def shockandrotation_setup(self, shock, rotation):
+        self.commands[0,1] = shock
+        self.commands[3,1] = rotation
+
+        shock_setup_command = self.command(4)
+        rotation_setup_command = self.command(1)
+        self.ser.write(shock_setup_command)
+        self.ser.write(rotation_setup_command)
+
     
 
 class hslider(QWidget):
@@ -210,9 +270,11 @@ class vslider(QWidget):
     def text_updates_slider(self):
         self.sl.setSliderPosition(int(self.txt.text()))    
 
+
 class QGB(QGridLayout):
-    def __init__(self):
+    def __init__(self, settings):
         super().__init__()
+        self.settings = settings
         self.groups = ["video setup", "experiment setup", "controls setup", "execute exp"]
 
         #these are all the push changes buttons that need to be callable, therefore defined here GROUPED
@@ -232,19 +294,26 @@ class QGB(QGridLayout):
         self.vspacer = QWidget();self.vspacer.setFixedHeight(25)
 
         self.gboxes = [self.gbox(i) for i in range(4)]
+
+        self.savesettings = QPushButton(text = 'save current settings to \'settings.json\'')
 #######################################################################################################
 
 
     def vs_layout(self):
         vs_layout = QVBoxLayout()
+        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('camera')).values()
+
+        self.Xdim_vid = hslider('X dim:', 0, 711, 1000/20, h)
+        self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
+
+        self.Xpos_vid = hslider('X pan:', -100, 100, 10, x_off)
+        self.Ypos_vid = hslider('Y pan:', -100, 100, 10, y_off)
+
         
-        Xdim_vid = hslider('X dim:', 0, 784, 784/20, 455)
-        Ydim_vid = hslider('Y dim:', 0, 582, 582/20, 455)
+        self.Xcenter_vid = hslider('X of center pt:', 0, 784, 1, x_cen)
+        self.Ycenter_vid = hslider('Y of center pt:', 0, 582, 1, y_cen)
 
-        Xpos_vid = hslider('X pan:', -100, 100, 10, 0)
-        Ypos_vid = hslider('Y pan:', -100, 100, 10, 0)
-
-        vs_layout.addWidget(Xdim_vid);vs_layout.addWidget(Ydim_vid);vs_layout.addWidget(self.vspacer);vs_layout.addWidget(Xpos_vid);vs_layout.addWidget(Ypos_vid);vs_layout.addWidget(self.push_vschanges)
+        vs_layout.addWidget(self.Xdim_vid);vs_layout.addWidget(self.Ydim_vid);vs_layout.addWidget(self.vspacer);vs_layout.addWidget(self.Xpos_vid);vs_layout.addWidget(self.Ypos_vid);vs_layout.addWidget(self.vspacer);vs_layout.addWidget(self.Xcenter_vid);vs_layout.addWidget(self.Ycenter_vid);vs_layout.addWidget(self.push_vschanges)
         return vs_layout
     
     def es_layout(self):
@@ -256,11 +325,11 @@ class QGB(QGridLayout):
     def cs_layout(self):
         cs_layout = QVBoxLayout()
 
-        shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, 5)
+        self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, 5)
 
-        rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, 5)
+        self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, 5)
 
-        cs_layout.addWidget(shock_setup);cs_layout.addWidget(rotation_setup);cs_layout.addWidget(self.push_eschanges)
+        cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.push_eschanges)
         return cs_layout
      
     def ee_layout(self):
@@ -288,23 +357,16 @@ class QGB(QGridLayout):
             sys.exit('you messed up the setup')
         ##insert other func here
         return box
+    
+
 
 class Maze_Controller(QWidget,QObject):
     def __init__(self):
         super().__init__()
-        if not os.path.exists('./settings.json'):
-            print('Missing settings file ... Loading defaults')
-            with open('default_settings.json', 'r') as default_settings:
-                self.settings = json.load(default_settings)
-            #loads the settings from the default file and saves them to a new settings file since there is none
-            with open('settings.json', 'w') as outfile:
-                json.dump(self.settings, outfile)
-        else:
-            print('Found settings file')
-            with open('settings.json', 'r') as json_settings:
-                self.settings = json.load(json_settings)
+
     # self.vid = pylon.InstantCamera();self.setup()
     # self.conv = pylon.ImageFormatConverter()
+        self.settings = settings()
 
         self.setWindowTitle('MazeController')
         self.showFullScreen()
@@ -316,12 +378,12 @@ class Maze_Controller(QWidget,QObject):
         livestream_layout = QVBoxLayout()
         livestream_widget = QWidget()
         self.livestream_lbl =  QLabel()
-        self.livestream_lbl.setFixedWidth(self.settings['camera']['width']);self.livestream_lbl.setFixedHeight(self.settings['camera']['height'])
+        self.livestream_lbl.setFixedWidth(self.settings.pull(('camera','width')));self.livestream_lbl.setFixedHeight(self.settings.pull(('camera','height')))
         self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
         self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
         livestream = QWidget();livestream.setLayout(livestream_layout)
-        self.grid = QGB()
+        self.grid = QGB(settings = self.settings)
         buttons =  QWidget();buttons.setLayout(self.grid)
         self.tab_dict = {'livestream':livestream, 'buttons':buttons}
         for i in self.tab_names:
@@ -335,16 +397,17 @@ class Maze_Controller(QWidget,QObject):
         self.grid.change_filepath.clicked.connect(self.pathprompt)
     
         model_path = self.model_pathprompt()
-        self.processor = processor(model_path = model_path)
+        self.processor = processor(model_path = model_path, settings = self.settings)
         self.preview_thread = QThread()
         self.stream_thread = QThread()
 
 
     def button_setup(self):
-        self.grid.push_vschanges.clicked.connect()
-        self.grid.push_eschanges.clicked.connect()
-        self.grid.push_vschanges.clicked.connect()
+        self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
+        self.grid.push_cschanges.clicked.connect(self.push_controlssetup_changes)
+        self.grid.push_eschanges.clicked.connect(self.pathprompt)
         self.grid.start.clicked.connect(self.main_processing)
+        self.grid.savesettings.clicked.connect(self.settings.save_settings_func)
         self.grid.stop.clicked.connect(self.shutdown_routine)
         self.grid.change_filepath.clicked.connect(self.pathprompt)
 
@@ -382,6 +445,8 @@ class Maze_Controller(QWidget,QObject):
 
         print("Shutdown Routine Activated")
         return
+    
+    
 
     @pyqtSlot(np.ndarray)
     def display_frame(self, frame):
@@ -389,6 +454,27 @@ class Maze_Controller(QWidget,QObject):
         Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(Qframe)
         self.livestream_lbl.setPixmap(pixmap)
+
+    def push_videosetup_changes(self):
+        a, b, c, d, e, f = self.grid.Xdim_vid.value(), self.grid.Ydim_vid.value(), self.grid.Xpos_vid.value(), self.grid.Ypos_vid.value(), self.grid.Xcenter_vid.value(), self.grid.Ycenter_vid.value()
+        self.settings.push_v((a, b, c, d, e, f))
+
+    def push_controlssetup_changes(self):
+        a, b = self.grid.shock_setup.value(), self.grid.rotation_setup.value()
+        self.settings.push_c((a, b))
+
+
+    @pyqtSlot()
+    def save_settings(self):
+        if os.path.exists('./settings.json'):
+            with open('settings.json', 'w') as outfile:
+                json.dump(self.settings.settings, outfile)
+                print('changed current settings file')
+        else:
+            with open('settings.json', 'w') as outfile:
+                json.dump(self.settings.settings, outfile)
+                print('no \'settings.json\' exists. new file created and settings saved')
+
 
 
 

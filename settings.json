@@ -2,7 +2,6 @@
     
     "experiment" : {
         "rpm" : 4,
-        "direction" : 0,
         "current" : 0.1
     },
     "camera": {
