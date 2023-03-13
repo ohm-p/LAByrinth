@@ -444,6 +444,7 @@ class Maze_Controller(QWidget,QObject):
         self.processor.vid.Close()
         self.processor.out.release()
         self.stream_thread.exit();self.preview_thread.exit()
+        self.settings.save_settings_func()
         # self.close()
         sys.exit('shutdown routine activated')    
     
