@@ -40,14 +40,14 @@ class settings():
             print('you attempted to pull settings that don\'t exist')
             return self.settings
 
-    def push_c(self, values:list):
-        if values.size == len(self.settings['camera']):
+    def push_c(self, values:tuple):
+        if np.size(values) == len(self.settings['camera']):
             self.settings['camera'] = dict([(list(self.settings['camera'].keys())[i], values[i]) for i in range(len(self.settings['camera']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
 
-    def push_v(self, values:list):
-        if values.size == len(self.settings['experiment']):
+    def push_v(self, values:tuple):
+        if np.size(values) == len(self.settings['experiment']):
             self.settings['experiment'] = dict([(list(self.settings['experiment'].keys())[i], values[i]) for i in range(len(self.settings['experiment']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
@@ -84,7 +84,7 @@ class processor(QObject):
         fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (1290, 720)
         vid_path = path +  self.dt + "_recording.avi"
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
-        self.setup()
+        self.setup();print('camera successfully initiated')
 
         self.commands = [[0x01, None], #1: rotation setup: default counter clockwise, 4-100rpm
         [0x02, 0x01], #2: rotate, 0x01 to start
@@ -93,12 +93,15 @@ class processor(QObject):
         [0x04, 0x01], #5: shock, 0x01 to start
         [0x04, 0x00]] #6: shock, 0x00 to stop
 
+        self.shock_on = False
+
         ###DLC setup
         self.dlc_processor = Processor()
         self.dlc_live = DLCLive(self.model_path)
         self.marker_dims = (7,7)
 
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
+        self.ser.open()
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
         self.center = (self.settings.pull(('camera', 'x_center',)), self.settings.pull(('camera', 'y_center',)))
         
@@ -130,6 +133,22 @@ class processor(QObject):
         grab.Release()
         self.vid.Close()
 
+    def model_startup(self):
+        self.setup()
+        grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
+        if grab.GrabSucceeded():
+            frame = grab.Array
+            pose = self.dlc_live.init_inference(frame)
+            mod_frame = frame.copy()
+            for i in range(3):
+                coords = (int(pose[i, 0]), int(pose[i, 1]))
+                cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+            self.frm.emit(mod_frame)
+        else:
+            sys.exit('cam failed to cap frame')
+        grab.Release()
+        self.vid.Close()
+
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
         self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
@@ -137,6 +156,7 @@ class processor(QObject):
 
     def setup(self):
         self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
+        self.res = np.array((self.w, self.h))
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
@@ -171,7 +191,7 @@ class processor(QObject):
     def in_sector(self, x, y):
         # time.sleep(0)
         vec_1 = np.array([x, y])
-        vec_2 = self.mag/2
+        vec_2 = self.res/2
         diff = vec_1 - vec_2;ratio = diff[1]/diff[0]
         theta = np.degrees(np.arctan(ratio))
         # true if calculated theta is in the 60 degree sector from -30 to 30 degrees
@@ -195,8 +215,8 @@ class processor(QObject):
          return bytearray(l)
     
     def shockandrotation_setup(self, shock, rotation):
-        self.commands[0,1] = shock
-        self.commands[3,1] = rotation
+        self.commands[0][1] = shock
+        self.commands[3][1] = rotation
 
         shock_setup_command = self.command(4)
         rotation_setup_command = self.command(1)
@@ -224,7 +244,7 @@ class hslider(QWidget):
 
 
         self.sl = QSlider(orientation)
-        self.sl.setMinimum(smin);self.sl.setMaximum(smax);self.sl.setTickInterval(sstep);self.sl.setTickPosition(QSlider.TickPosition(3));self.sl.setValue(self.start)
+        self.sl.setMinimum(smin);self.sl.setMaximum(smax);self.sl.setTickInterval(int(sstep));self.sl.setTickPosition(QSlider.TickPosition(3));self.sl.setValue(self.start)
         self.sl.setFixedWidth(200)
         self.sl.valueChanged.connect(self.slider_updates_text)
 
@@ -288,6 +308,7 @@ class QGB(QGridLayout):
         self.push_cschanges = QPushButton(text = f'Push \'{self.groups[2]}\' Changes?')
         #experiment execution
         self.start = QPushButton(text = 'Start Experiment')
+        self.preview = QPushButton(text = 'click to preview')
         self.stop = QPushButton(text = 'Stop Experiment')
         self.savesettings = QPushButton(text = 'save current settings to \'settings.json\'')
 
@@ -335,7 +356,7 @@ class QGB(QGridLayout):
     def ee_layout(self):
         ee_layout = QVBoxLayout()
 
-        ee_layout.addWidget(self.start);ee_layout.addWidget(self.stop);ee_layout.addWidget(self.savesettings)
+        ee_layout.addWidget(self.start);ee_layout.addWidget(self.preview);ee_layout.addWidget(self.stop);ee_layout.addWidget(self.savesettings)
         return ee_layout
     
     def gbox(self, ind):
@@ -382,10 +403,10 @@ class Maze_Controller(QWidget,QObject):
         self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
         self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
-        livestream = QWidget();livestream.setLayout(livestream_layout)
+        livestream_widget.setLayout(livestream_layout)
         self.grid = QGB(settings = self.settings)
         buttons =  QWidget();buttons.setLayout(self.grid)
-        self.tab_dict = {'livestream':livestream, 'buttons':buttons}
+        self.tab_dict = {'livestream':livestream_widget, 'buttons':buttons}
         for i in self.tab_names:
             self.tabs.addTab(self.tab_dict[i], i)
         self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
@@ -398,16 +419,21 @@ class Maze_Controller(QWidget,QObject):
     
         model_path = self.model_pathprompt()
         self.processor = processor(model_path = model_path, settings = self.settings)
+        self.processor.frm.connect(self.display_frame)
         self.preview_thread = QThread()
         self.stream_thread = QThread()
+        self.model_startup_thread = QThread()
+        self.button_setup()
+        self.model_startup()
 
 
     def button_setup(self):
         self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
         self.grid.push_cschanges.clicked.connect(self.push_controlssetup_changes)
         self.grid.push_eschanges.clicked.connect(self.pathprompt)
-        self.grid.start.clicked.connect(self.main_processing)
         self.grid.savesettings.clicked.connect(self.settings.save_settings_func)
+        self.grid.start.clicked.connect(self.main_processing)
+        self.grid.preview.clicked.connect(self.preview)
         self.grid.stop.clicked.connect(self.shutdown_routine)
         self.grid.change_filepath.clicked.connect(self.pathprompt)
 
@@ -433,11 +459,17 @@ class Maze_Controller(QWidget,QObject):
         self.push_controlssetup_changes()
         self.processor.command(2)
 
-
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
         self.preview_thread.start()
+    
+    def model_startup(self):
+        #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
+        self.processor.moveToThread(self.model_startup_thread)
+        self.model_startup_thread.started.connect(self.processor.model_startup)
+        self.model_startup_thread.start()
+        
 
     def shutdown_routine(self):
         #add all shutdown commands here
@@ -457,11 +489,17 @@ class Maze_Controller(QWidget,QObject):
         self.livestream_lbl.setPixmap(pixmap)
 
     def push_videosetup_changes(self):
-        a, b, c, d, e, f = self.grid.Xdim_vid.value(), self.grid.Ydim_vid.value(), self.grid.Xpos_vid.value(), self.grid.Ypos_vid.value(), self.grid.Xcenter_vid.value(), self.grid.Ycenter_vid.value()
+        a = self.grid.Xdim_vid.sl.value()
+        b = self.grid.Ydim_vid.sl.value()
+        c = self.grid.Xpos_vid.sl.value()
+        d = self.grid.Ypos_vid.sl.value()
+        e = self.grid.Xcenter_vid.sl.value()
+        f = self.grid.Ycenter_vid.sl.value()
         self.settings.push_v((a, b, c, d, e, f))
 
     def push_controlssetup_changes(self):
-        a, b = self.grid.shock_setup.value(), self.grid.rotation_setup.value()
+        a = self.grid.shock_setup.sl.value()
+        b = self.grid.rotation_setup.sl.value()
         self.processor.shockandrotation_setup(a, b)
         self.settings.push_c((a, b))
 

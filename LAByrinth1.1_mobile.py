@@ -75,9 +75,11 @@ class processor(QObject):
         self.settings = settings
         self._run_flag = False
         path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
+        # path = "C:\\tracking_system\\_OHM\\vids\\"
         self.dt = datetime.strftime(datetime.now(), "d%y.%m.%d_t%H.%M")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v');fps = 30.0;frameSize = (1290, 720)
-        vid_path = path +  self.dt + "_recording.avi"
+        # fourcc = cv2.VideoWriter_fourcc(*'mp4v');fps = 30.0;frameSize = (1290, 720)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v');fps = 30.0;frameSize = (455, 455)
+        vid_path = path +  self.dt + "_recording.mp4"
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.setup();self.vid.release();print('camera successfully initiated')
 
@@ -115,6 +117,7 @@ class processor(QObject):
         while self._run_flag:
             ret, frame = self.vid.read()  
             if ret:
+                print("___")
                 mod_frame = self.mobile_process(frame)
                 self.frm.emit(mod_frame)
                 self.out.write(frame)
@@ -371,7 +374,7 @@ class Maze_Controller(QWidget,QObject):
         self.preview_thread = QThread()
         self.stream_thread = QThread()
         self.button_setup()
-        self.main_processing()
+        # self.main_processing()
         
 
 
