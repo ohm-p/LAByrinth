@@ -1,0 +1,16 @@
+{
+    
+    "experiment" : {
+        "rpm" : 4,
+        "current" : 0.1
+    },
+    "camera": {
+        "height" : 455,
+        "width" : 455,
+        "x_offset" : 71,
+        "y_offset" : 0,
+        "x_center":223,
+        "y_center":223  
+    }
+    
+    }
