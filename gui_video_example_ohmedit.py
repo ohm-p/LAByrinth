@@ -16,7 +16,6 @@ from qt_material import apply_stylesheet
 class processor(QObject):
     frm = pyqtSignal(np.ndarray)
 
-    nnect
     def __init__(self):
         super().__init__()
         self.settings = {}
@@ -26,7 +25,8 @@ class processor(QObject):
         fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (1290, 720)
         vid_path = path +  self.dt + "_recording.avi"
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
-        self.vid = pylon.InstantCamera();self.setup(self.settings)
+        # self.vid = pylon.InstantCamera();self.setup(self.settings)
+        self.vid = cv2.VideoCapture(0)
 
     def grab_single(self):
         if not self.vid.isOpened():
@@ -46,6 +46,7 @@ class processor(QObject):
             ret, frame = self.vid.read()
             if ret:
                 self.frm.emit(frame)
+                print('frame successfully pulled')
                 self.out.write(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             else:
                 sys.exit('the camera failed to capture a frame')
@@ -126,7 +127,7 @@ class hslider(QWidget):
 
 
         self.sl = QSlider(orientation)
-        self.sl.setMinimum(smin);self.sl.setMaximum(smax);self.sl.setTickInterval(sstep);self.sl.setTickPosition(QSlider.TickPosition(3));self.sl.setValue(self.start)
+        self.sl.setMinimum(smin);self.sl.setMaximum(smax);self.sl.setTickInterval(int(sstep));self.sl.setTickPosition(QSlider.TickPosition(3));self.sl.setValue(self.start)
         self.sl.setFixedWidth(200)
         self.sl.valueChanged.connect(self.slider_updates_text)
 
@@ -272,7 +273,7 @@ class Maze_Controller(QWidget,QObject):
         # self.conv = pylon.ImageFormatConverter()
 
         def win_setup():
-            self.windowTitle('MazeController')
+            self.setWindowTitle('MazeController')
             self.showFullScreen()
             self.exit= QAction("Exit Application",shortcut=QKeySequence("Esc"),triggered=self.shutdown_routine)
             self.addAction(self.exit)
@@ -292,7 +293,7 @@ class Maze_Controller(QWidget,QObject):
             livestream = QWidget();livestream.setLayout(livestream_layout)
             self.grid = QGB()
             buttons =  QWidget();buttons.setLayout(self.grid)
-            self.tab_dict = {'livestream':self.livestream, 'buttons':self.buttons}
+            self.tab_dict = {'livestream':livestream_widget, 'buttons':buttons}
             for i in self.tab_names:
                 self.tabs.addTab(self.tab_dict[i], i)
             self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
