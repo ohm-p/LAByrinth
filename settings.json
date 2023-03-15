@@ -1,11 +1,11 @@
 {
     
-    "experiment" : {
+    "controls" : {
         "rpm" : 4,
         "current" : 0.1,
         "sector_center" : 0
     },
-    "camera": {
+    "video": {
         "height" : 455,
         "width" : 455,
         "x_offset" : 71,

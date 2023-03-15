@@ -40,15 +40,15 @@ class settings():
             print('you attempted to pull settings that don\'t exist')
             return self.settings
 
-    def push_c(self, values:tuple):
-        if np.size(values) == len(self.settings['camera']):
-            self.settings['camera'] = dict([(list(self.settings['camera'].keys())[i], values[i]) for i in range(len(self.settings['camera']))])
+    def push_v(self, values:tuple):
+        if np.size(values) == len(self.settings['video'].values()):
+            self.settings['video'] = dict([(list(self.settings['video'].keys())[i], values[i]) for i in range(len(self.settings['video']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
 
-    def push_v(self, values:tuple):
-        if np.size(values) == len(self.settings['experiment']):
-            self.settings['experiment'] = dict([(list(self.settings['experiment'].keys())[i], values[i]) for i in range(len(self.settings['experiment']))])
+    def push_c(self, values:tuple):
+        if np.size(values) == len(self.settings['controls']):
+            self.settings['controls'] = dict([(list(self.settings['controls'].keys())[i], values[i]) for i in range(len(self.settings['controls']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
 
@@ -103,8 +103,8 @@ class processor(QObject):
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
         self.ser.open()
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
-        self.center = (self.settings.pull(('camera', 'x_center',)), self.settings.pull(('camera', 'y_center',)))
-        self.angle_center = self.settings.pul(('experiment', 'sector_center'))
+        self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
+        self.angle_center = self.settings.pull(('controls', 'sector_center'))
         
 
     def grab_single(self):
@@ -152,11 +152,11 @@ class processor(QObject):
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
         self.setup()
 
     def setup(self):
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
         self.res = np.array((self.w, self.h))
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
@@ -178,14 +178,14 @@ class processor(QObject):
                     self.ser.write(self.command(5))
                     self.shock_on = True
                     #notes the time that the shock started, for later use
-                    self.start_timer = time()               
+                    self.start_timer = time.localtime()               
         else:
                 #shock is not delivered since the subject is not in the sector (turned off if on)
                 if self.shock_on:
                     self.ser.write(self.command(6))
                     self.shock_on = False
                     #notes the time that the shock ended, subtracts from start and adds to the array
-                    self.final_time = time() - self.start_timer
+                    self.final_time = time.localtime() - self.start_timer
                     self.times_inzone = np.append(self.times_inzone, self.final_time)                  
         return mod_frame        
 
@@ -196,7 +196,7 @@ class processor(QObject):
         diff = vec_1 - vec_2;ratio = diff[1]/diff[0]
         theta = np.degrees(np.arctan(ratio))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
-        upper = self.angle_center + 30; lower = self.angle - 30
+        upper = self.angle_center + 30; lower = self.angle_center - 30
         if (theta < upper and theta > lower):
             #boolean output for the shock function
             return True
@@ -225,6 +225,12 @@ class processor(QObject):
         self.ser.write(shock_setup_command)
         self.ser.write(rotation_setup_command)
 
+    def move_thread(self, thread:QThread):
+        self.moveToThread(thread)
+
+
+    def write_command(self, i:int):
+        self.ser.write(self.command(i))
     
 
 class hslider(QWidget):
@@ -324,7 +330,7 @@ class QGB(QGridLayout):
 
     def vs_layout(self):
         vs_layout = QVBoxLayout()
-        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('camera',)).values()
+        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('video',)).values()
 
         self.Xdim_vid = hslider('X dim:', 0, 711, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
@@ -403,7 +409,7 @@ class Maze_Controller(QWidget,QObject):
         livestream_layout = QVBoxLayout()
         livestream_widget = QWidget()
         self.livestream_lbl =  QLabel()
-        self.livestream_lbl.setFixedWidth(self.settings.pull(('camera','width',)));self.livestream_lbl.setFixedHeight(self.settings.pull(('camera','height',)))
+        self.livestream_lbl.setFixedWidth(self.settings.pull(('video','width',)));self.livestream_lbl.setFixedHeight(self.settings.pull(('video','height',)))
         self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
         self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
@@ -457,27 +463,27 @@ class Maze_Controller(QWidget,QObject):
         #get Qthreadpool to keep gui up to date       
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
-        self.stream_thread.finished.connect(self.processor.moveToThread(self.main_thread))
+        self.stream_thread.finished.connect(self.move_processor)
         self.stream_thread.start()
         self.push_controlssetup_changes()
-        self.processor.command(2)
+        self.processor.write_command(2)
 
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
-        self.preview_thread.finished.connect(self.processor.moveToThread(self.main_thread))
+        self.preview_thread.finished.connect(self.move_processor)
         self.preview_thread.start()
     
     def model_startup(self):
         #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
         self.processor.moveToThread(self.model_startup_thread)
         self.model_startup_thread.started.connect(self.processor.model_startup)
-        self.model_startup_thread.finished.connect(self.processor.moveToThread(self.main_thread))
+        self.model_startup_thread.finished.connect(self.move_processor)
         self.model_startup_thread.start()
 
-    # def move_processor(self, old_thread, new_thread):
+    def move_processor(self):
+        self.processor.move_thread(self.main_thread)
 
-        
 
     def shutdown_routine(self):
         #add all shutdown commands here
