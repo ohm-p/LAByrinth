@@ -104,6 +104,7 @@ class processor(QObject):
         self.ser.open()
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
         self.center = (self.settings.pull(('camera', 'x_center',)), self.settings.pull(('camera', 'y_center',)))
+        self.angle_center = self.settings.pul(('experiment', 'sector_center'))
         
 
     def grab_single(self):
@@ -194,8 +195,9 @@ class processor(QObject):
         vec_2 = self.res/2
         diff = vec_1 - vec_2;ratio = diff[1]/diff[0]
         theta = np.degrees(np.arctan(ratio))
-        # true if calculated theta is in the 60 degree sector from -30 to 30 degrees
-        if (theta < 30 and theta > -30):
+        # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
+        upper = self.angle_center + 30; lower = self.angle - 30
+        if (theta < upper and theta > lower):
             #boolean output for the shock function
             return True
         
@@ -350,7 +352,9 @@ class QGB(QGridLayout):
 
         self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, 5)
 
-        cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.push_eschanges)
+        self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, 0)
+
+        cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.sector_center);cs_layout.addWidget(self.push_eschanges)
         return cs_layout
      
     def ee_layout(self):
@@ -420,9 +424,7 @@ class Maze_Controller(QWidget,QObject):
         model_path = self.model_pathprompt()
         self.processor = processor(model_path = model_path, settings = self.settings)
         self.processor.frm.connect(self.display_frame)
-        self.preview_thread = QThread()
-        self.stream_thread = QThread()
-        self.model_startup_thread = QThread()
+        self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread();self.main_thread = QThread.currentThread()
         self.button_setup()
         self.model_startup()
 
@@ -455,6 +457,7 @@ class Maze_Controller(QWidget,QObject):
         #get Qthreadpool to keep gui up to date       
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
+        self.stream_thread.finished.connect(self.processor.moveToThread(self.main_thread))
         self.stream_thread.start()
         self.push_controlssetup_changes()
         self.processor.command(2)
@@ -462,13 +465,18 @@ class Maze_Controller(QWidget,QObject):
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
+        self.preview_thread.finished.connect(self.processor.moveToThread(self.main_thread))
         self.preview_thread.start()
     
     def model_startup(self):
         #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
         self.processor.moveToThread(self.model_startup_thread)
         self.model_startup_thread.started.connect(self.processor.model_startup)
+        self.model_startup_thread.finished.connect(self.processor.moveToThread(self.main_thread))
         self.model_startup_thread.start()
+
+    # def move_processor(self, old_thread, new_thread):
+
         
 
     def shutdown_routine(self):
@@ -500,8 +508,9 @@ class Maze_Controller(QWidget,QObject):
     def push_controlssetup_changes(self):
         a = self.grid.shock_setup.sl.value()
         b = self.grid.rotation_setup.sl.value()
+        c = self.grid.sector_center.sl.value()
         self.processor.shockandrotation_setup(a, b)
-        self.settings.push_c((a, b))
+        self.settings.push_c((a, b, c))
 
 
     @pyqtSlot()

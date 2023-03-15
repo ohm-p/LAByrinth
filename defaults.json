@@ -2,7 +2,8 @@
     
     "experiment" : {
         "rpm" : 4,
-        "current" : 0.1
+        "current" : 0.1,
+        "sector_center" : 0
     },
     "camera": {
         "height" : 455,
