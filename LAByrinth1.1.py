@@ -3,7 +3,6 @@ import numpy as np
 import serial, cv2, sys, os, json, pickle
 from pypylon import pylon, genicam
 import time
-from datetime import datetime, date 
 
 from multiprocessing import Process
 from threading import Thread
@@ -80,11 +79,13 @@ class processor(QObject):
         self.settings = settings
         self._run_flag = False
         path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
-        self.dt = datetime.strftime(datetime.now(), "d%y.%m.%d_t%H.%M")
+        self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
         fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (1290, 720)
         vid_path = path +  self.dt + "_recording.avi"
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.setup();print('camera successfully initiated')
+        self.shock_on = False
+        self.times = []
 
         self.commands = [[0x01, None], #1: rotation setup: default counter clockwise, 4-100rpm
         [0x02, 0x01], #2: rotate, 0x01 to start
@@ -93,7 +94,7 @@ class processor(QObject):
         [0x04, 0x01], #5: shock, 0x01 to start
         [0x04, 0x00]] #6: shock, 0x00 to stop
 
-        self.shock_on = False
+
 
         ###DLC setup
         self.dlc_processor = Processor()
@@ -176,21 +177,22 @@ class processor(QObject):
                 #the subject is in the sector, so shock is delivered (turned on if off)
                 if not self.shock_on:
                     self.ser.write(self.command(5))
-                    self.shock_on = True
-                    #notes the time that the shock started, for later use
-                    self.start_timer = time.localtime()               
+                    self.start_shock = time.perf_counter()
+                    self.shock_on = True             
         else:
                 #shock is not delivered since the subject is not in the sector (turned off if on)
                 if self.shock_on:
                     self.ser.write(self.command(6))
+                    self.end_shock = time.perf_counter()
+                    self.end_time = time.strftime("%H.%M.%S")
                     self.shock_on = False
                     #notes the time that the shock ended, subtracts from start and adds to the array
-                    self.final_time = time.localtime() - self.start_timer
-                    self.times_inzone = np.append(self.times_inzone, self.final_time)                  
+                    diff = self.end_shock - self.start_shock
+                    self.times.append([self.end_time, diff])
+
         return mod_frame        
 
     def in_sector(self, x, y):
-        # time.sleep(0)
         vec_1 = np.array([x, y])
         vec_2 = self.res/2
         diff = vec_1 - vec_2;ratio = diff[1]/diff[0]

@@ -41,14 +41,14 @@ class settings():
             return self.settings
 
     def push_c(self, values:tuple):
-        if np.size(values) == len(self.settings['camera']):
-            self.settings['camera'] = dict([(list(self.settings['camera'].keys())[i], values[i]) for i in range(len(self.settings['camera']))])
+        if np.size(values) == len(self.settings['video']):
+            self.settings['video'] = dict([(list(self.settings['video'].keys())[i], values[i]) for i in range(len(self.settings['video']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
 
     def push_v(self, values:tuple):
-        if np.size(values) == len(self.settings['experiment']):
-            self.settings['experiment'] = dict([(list(self.settings['experiment'].keys())[i], values[i]) for i in range(len(self.settings['experiment']))])
+        if np.size(values) == len(self.settings['controls']):
+            self.settings['controls'] = dict([(list(self.settings['controls'].keys())[i], values[i]) for i in range(len(self.settings['controls']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
 
@@ -96,7 +96,7 @@ class processor(QObject):
         self.marker_dims = (7,7)
 
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
-        self.center = (self.settings.pull(('camera', 'x_center',)), self.settings.pull(('camera', 'y_center',)))
+        self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         
 
     def grab_single(self):
@@ -128,11 +128,11 @@ class processor(QObject):
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
         self.setup()
 
     def setup(self):
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('camera',)).values()
+        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
         self.vid = cv2.VideoCapture(0)
         self.vid.set(cv2.CAP_PROP_FRAME_WIDTH, self.w)
         if not self.vid.isOpened():
@@ -277,7 +277,7 @@ class QGB(QGridLayout):
 
     def vs_layout(self):
         vs_layout = QVBoxLayout()
-        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('camera',)).values()
+        h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('video',)).values()
 
         self.Xdim_vid = hslider('X dim:', 0, 711, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
@@ -354,7 +354,7 @@ class Maze_Controller(QWidget,QObject):
         livestream_layout = QVBoxLayout()
         livestream_widget = QWidget()
         self.livestream_lbl =  QLabel();self.livestream_lbl.setMinimumHeight(200)
-        # self.livestream_lbl.setFixedWidth(self.settings.pull(('camera','width',)));self.livestream_lbl.setFixedHeight(self.settings.pull(('camera','height',)))
+        # self.livestream_lbl.setFixedWidth(self.settings.pull(('video','width',)));self.livestream_lbl.setFixedHeight(self.settings.pull(('video','height',)))
         self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
         self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         livestream_layout.addWidget(self.livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
