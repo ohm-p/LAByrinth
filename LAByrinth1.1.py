@@ -407,7 +407,6 @@ class Maze_Controller(QWidget,QObject):
         self.addAction(self.exit)
         apply_stylesheet(app, theme='dark_cyan.xml')
         self.tabs = QTabWidget()
-        self.tab_names = ['livestream', 'buttons']
         livestream_layout = QVBoxLayout()
         livestream_widget = QWidget()
         self.livestream_lbl =  QLabel()
@@ -419,8 +418,8 @@ class Maze_Controller(QWidget,QObject):
         self.grid = QGB(settings = self.settings)
         buttons =  QWidget();buttons.setLayout(self.grid)
         self.tab_dict = {'livestream':livestream_widget, 'buttons':buttons}
-        for i in self.tab_names:
-            self.tabs.addTab(self.tab_dict[i], i)
+        for k, v in self.tab_dict.items():
+            self.tabs.addTab(k, v)
         self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
         self.setLayout(self.main_layout)
     
