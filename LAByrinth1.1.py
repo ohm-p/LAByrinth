@@ -3,6 +3,7 @@ import numpy as np
 import serial, cv2, sys, os, json, pickle
 from pypylon import pylon, genicam
 import time
+from time import time, sleep
 
 from multiprocessing import Process
 from threading import Thread
@@ -68,6 +69,7 @@ class settings():
 
 class processor(QObject):
     frm = pyqtSignal(np.ndarray)
+    fin = pyqtSignal()
     
     def __init__(self, model_path, settings):
         super().__init__()
@@ -75,7 +77,8 @@ class processor(QObject):
             self.model_path = model_path
         else:
             sys.exit('error selecting the correct model.')
-
+        
+        self.main_thread = self.thread()
         self.settings = settings
         self._run_flag = False
         path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
@@ -119,6 +122,7 @@ class processor(QObject):
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
+        self.fin.emit()
         
     def grab_stream(self):
         self.setup()
@@ -134,6 +138,7 @@ class processor(QObject):
                 break
         grab.Release()
         self.vid.Close()
+        self.fin.emit()
 
     def model_startup(self):
         self.setup()
@@ -150,6 +155,7 @@ class processor(QObject):
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
+        self.fin.emit()
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
@@ -230,9 +236,11 @@ class processor(QObject):
     def move_thread(self, thread:QThread):
         self.moveToThread(thread)
 
-
     def write_command(self, i:int):
         self.ser.write(self.command(i))
+
+    def reset_thread(self):
+       self.moveToThread(self.main_thread)
     
 
 class hslider(QWidget):
@@ -419,7 +427,7 @@ class Maze_Controller(QWidget,QObject):
         buttons =  QWidget();buttons.setLayout(self.grid)
         self.tab_dict = {'livestream':livestream_widget, 'buttons':buttons}
         for k, v in self.tab_dict.items():
-            self.tabs.addTab(k, v)
+            self.tabs.addTab(v, k)
         self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
         self.setLayout(self.main_layout)
     
@@ -431,6 +439,7 @@ class Maze_Controller(QWidget,QObject):
         model_path = self.model_pathprompt()
         self.processor = processor(model_path = model_path, settings = self.settings)
         self.processor.frm.connect(self.display_frame)
+        self.processor.fin.connect(self.thread_fin)
         self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread();self.main_thread = QThread.currentThread()
         self.button_setup()
         self.model_startup()
@@ -464,7 +473,6 @@ class Maze_Controller(QWidget,QObject):
         #get Qthreadpool to keep gui up to date       
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
-        self.stream_thread.finished.connect(self.move_processor)
         self.stream_thread.start()
         self.push_controlssetup_changes()
         self.processor.write_command(2)
@@ -472,18 +480,24 @@ class Maze_Controller(QWidget,QObject):
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
-        self.preview_thread.finished.connect(self.move_processor)
         self.preview_thread.start()
     
     def model_startup(self):
         #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
         self.processor.moveToThread(self.model_startup_thread)
         self.model_startup_thread.started.connect(self.processor.model_startup)
-        self.model_startup_thread.finished.connect(self.move_processor)
         self.model_startup_thread.start()
 
-    def move_processor(self):
-        self.processor.move_thread(self.main_thread)
+    def thread_fin(self):
+        thread = self.processor.thread()
+        thread.quit()
+        thread.started.disconnect()
+        # thread.finished.disconnect()
+        thread.started.connect(self.processor.reset_thread)
+        thread.finished.connect(thread.quit)
+        thread.start();sleep(2)
+
+        print('processor successfully resert to self.main_thread')
 
 
     def shutdown_routine(self):
