@@ -58,7 +58,6 @@ class MazeGUI(QWidget):
         self.thread1 = QThread()
         self.thread2 = QThread()
         self.thread3 = QThread()
-        self.main_thread = QThread.currentThread()
         self.processor = Processor()
         buttons.setLayout(self.button_setup())        
         self.tab_dict = {'buttons':buttons, 'livestream':livestream}
@@ -88,19 +87,16 @@ class MazeGUI(QWidget):
     def one(self):
         self.processor.moveToThread(self.thread1)
         self.thread1.started.connect(self.processor.func1)
-        # self.thread1.finished.connect(self.thread_done)
         self.thread1.start()
 
     def two(self):
         self.processor.moveToThread(self.thread2)
         self.thread2.started.connect(self.processor.func2)
-        # self.thread2.finished.connect(self.thread_done)
         self.thread2.start()
 
     def three(self):
         self.processor.moveToThread(self.thread3)
         self.thread3.started.connect(self.processor.func3)
-        # self.thread3.finished.connect(self.thread_done)
         self.thread3.start()
 
     def thread_done(self):
