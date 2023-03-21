@@ -3,7 +3,7 @@ import numpy as np
 import serial, cv2, sys, os, json, pickle
 from pypylon import pylon, genicam
 import time
-from time import time, sleep
+from time import sleep
 
 from multiprocessing import Process
 from threading import Thread
@@ -13,9 +13,10 @@ from PyQt6.QtGui import *
 from PyQt6.QtCore import *
 from qt_material import apply_stylesheet
 
-class settings():
-    sig = pyqtSignal()
+class settings(QObject):
+    sig = pyqtSignal(dict)
     def __init__(self):
+        super().__init__()
         if not os.path.exists('./settings.json'):
             print('Missing settings file ... Loading defaults')
             with open('defaults.json', 'r') as default_settings:
@@ -45,12 +46,14 @@ class settings():
             self.settings['video'] = dict([(list(self.settings['video'].keys())[i], values[i]) for i in range(len(self.settings['video']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
+        self.sig.emit(self.settings)
 
     def push_c(self, values:tuple):
         if np.size(values) == len(self.settings['controls']):
             self.settings['controls'] = dict([(list(self.settings['controls'].keys())[i], values[i]) for i in range(len(self.settings['controls']))])
         else:
             sys.exit('attempted passing settings of incorrect size')
+        self.sig.emit(self.settings)
 
     def save_settings_func(self):
         if not self._open_flag_:
@@ -81,14 +84,25 @@ class processor(QObject):
         self.main_thread = self.thread()
         self.settings = settings
         self._run_flag = False
-        path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
-        self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
-        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (1290, 720)
-        vid_path = path +  self.dt + "_recording.avi"
-        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.setup();print('camera successfully initiated')
+        grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
+        if grab.GrabSucceeded():
+            self.W = grab.Width
+            self.H = grab.Height
+        else:
+            sys.exit('init grab failed, please make sure the camera is connected')
+        # path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
+        path = "C:\\tracking_system\\_OHM\\vids\\"
+        self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
+        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (self.H, self.W)
+        vid_path = path +  self.dt + "_recording.avi"
+        self.poses_path = path + self.dt + "_poses.txt"
+        self.times_path = path + self.dt + "_times.txt"
+        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
+        self.out = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'MJPG'), fps, frameSize)
         self.shock_on = False
         self.times = []
+        self.poses = []
 
         self.commands = [[0x01, None], #1: rotation setup: default counter clockwise, 4-100rpm
         [0x02, 0x01], #2: rotate, 0x01 to start
@@ -109,20 +123,27 @@ class processor(QObject):
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
+        self.settings.sig.connect(self.update_settings)
         
+    @pyqtSlot(dict)
+    def update_settings(self, new_settings):
+        self.settings.settings = new_settings
+
 
     def grab_single(self):
         self.setup()
         grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
         if grab.GrabSucceeded():
+            self.W = grab.Width
+            self.H = grab.Height
             frame = grab.Array
-            mod_frame = self.process(frame)
+            mod_frame = self.idle_process(frame)
             self.frm.emit(mod_frame)
         else:
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
-        self.fin.emit()
+        sleep(1);self.fin.emit()
         
     def grab_stream(self):
         self.setup()
@@ -131,14 +152,14 @@ class processor(QObject):
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
                 frame = grab.Array
-                mod_frame = self.process(frame)
+                mod_frame = self.stream_process(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
                 break
         grab.Release()
         self.vid.Close()
-        self.fin.emit()
+        sleep(1);self.fin.emit()
 
     def model_startup(self):
         self.setup()
@@ -155,7 +176,7 @@ class processor(QObject):
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
-        self.fin.emit()
+        sleep(1);self.fin.emit()
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
@@ -169,8 +190,18 @@ class processor(QObject):
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-    
-    def process(self, frame):
+
+    def idle_process(self, frame):
+        pose = self.dlc_live.get_pose(frame) 
+        mod_frame = frame.copy()
+        for i in range(3):
+            coords = (int(pose[i, 0]), int(pose[i, 1]))
+            cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+        cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        return mod_frame      
+
+
+    def stream_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
         mod_frame = frame.copy()
         for i in range(3):
@@ -195,7 +226,8 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     self.times.append([self.end_time, diff])
-
+        self.poses.append(pose)
+        self.out.write(frame)
         return mod_frame        
 
     def in_sector(self, x, y):
@@ -211,7 +243,7 @@ class processor(QObject):
         
     # simplified command function, see previous version for legacy (eliminated 5 other commands and simplified process)
     def command(self, inp):
-         d2, d3 = self.commands[inp - 1]
+         d2, d3 = self.commands[int(inp) - 1]
          d0 = 0xaa
          d1 = 0xbb
          d4 = 0x00
@@ -335,14 +367,18 @@ class QGB(QGridLayout):
 
         self.gboxes = [self.gbox(i) for i in range(4)]
 
- #######################################################################################################
+        self.settings.sig.connect(self.update_settings)
+
+    @pyqtSlot(dict)
+    def update_settings(self, new_settings):
+        self.settings.settings = new_settings
 
 
     def vs_layout(self):
         vs_layout = QVBoxLayout()
         h, w, x_off, y_off, x_cen, y_cen = self.settings.pull(('video',)).values()
 
-        self.Xdim_vid = hslider('X dim:', 0, 711, 1000/20, h)
+        self.Xdim_vid = hslider('X dim:', 0, 582, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
 
         self.Xpos_vid = hslider('X pan:', -100, 100, 10, x_off)
@@ -370,7 +406,7 @@ class QGB(QGridLayout):
 
         self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, 0)
 
-        cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.sector_center);cs_layout.addWidget(self.push_eschanges)
+        cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.sector_center);cs_layout.addWidget(self.push_cschanges)
         return cs_layout
      
     def ee_layout(self):
@@ -444,6 +480,11 @@ class Maze_Controller(QWidget,QObject):
         self.button_setup()
         self.model_startup()
 
+        self.settings.sig.connect(self.update_settings)
+
+    @pyqtSlot(dict)
+    def update_settings(self, new_settings):
+        self.settings.settings = new_settings
 
     def button_setup(self):
         self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
@@ -490,22 +531,27 @@ class Maze_Controller(QWidget,QObject):
 
     def thread_fin(self):
         thread = self.processor.thread()
-        thread.quit()
-        thread.started.disconnect()
-        # thread.finished.disconnect()
-        thread.started.connect(self.processor.reset_thread)
-        thread.finished.connect(thread.quit)
-        thread.start();sleep(2)
+        if thread != self.main_thread:
+            thread.quit()
+            thread.started.disconnect()
+            # thread.finished.disconnect()
+            thread.started.connect(self.processor.reset_thread)
+            thread.finished.connect(thread.quit)
+            thread.start();sleep(2)
 
-        print('processor successfully resert to self.main_thread')
+        if self.processor.thread() == self.main_thread:
+            print('processor successfully reset to self.main_thread')
+
 
 
     def shutdown_routine(self):
         #add all shutdown commands here
+        self.processor.write_command(self.processor.command(3));self.processor.write_command(self.processor.command(6))
+        self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
         self.processor.out.release()
-        self.stream_thread.exit();self.preview_thread.exit()
         self.settings.save_settings_func()
+
         # self.close()
         sys.exit('shutdown routine activated')    
     
