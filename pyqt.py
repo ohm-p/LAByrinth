@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import json
 from qt_material import apply_stylesheet
+import random
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -198,13 +199,24 @@ class MazeGUI(QWidget):
         livestream_widget = QWidget()
         livestream_lbl =  QLabel()
         livestream_lbl.setFixedWidth(self.settings['video']['width']);livestream_lbl.setFixedHeight(self.settings['video']['height'])
-        self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(3);self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.']);self.data_table.setVerticalHeaderLabels(['nose', 'center', 'tail'])
-        self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        livestream_layout.addWidget(livestream_lbl, Qt.AlignmentFlag.AlignCenter);livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
+        self.data_table = QTableWidget();self.data_table.setRowCount(3);self.data_table.setColumnCount(1)
+        # self.data_table.setHorizontalHeaderLabels(['X', 'Y', 'prob.'])
+        self.data_table.setVerticalHeaderLabels(['r1', 'r2', 'r3']);self.data_table.setHorizontalHeaderLabels(['C1'])
+        # self.data_table.setEditTriggers(QAbstractItemView.3.NoEditTriggers)
+        # livestream_layout.addWidget(livestream_lbl, Qt.AlignmentFlag.AlignCenter)
+        livestream_layout.addWidget(self.data_table, Qt.AlignmentFlag.AlignCenter)
         livestream = QWidget();livestream.setLayout(livestream_layout)
         
-        self.grid = QGB()
-        buttons =  QWidget();buttons.setLayout(self.grid)
+        # self.grid = QGB()
+        buttons_layout = QVBoxLayout()
+        self.sliders_dict = {}
+        names = [str(i) for i in range(1, 4)]
+        for i in range(3):
+            sl = hslider(names[i], 0, 100, 1, random.randint(0, 100))
+            addn = {names[i] : sl}
+            self.sliders_dict.update(addn)
+            buttons_layout.addWidget(sl)
+        buttons =  QWidget();buttons.setLayout(buttons_layout)
         
         # self.tabs.addTab(self.livestream, 'livestream')
         
@@ -217,20 +229,23 @@ class MazeGUI(QWidget):
         self.setLayout(self.main_layout)
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
-        self.grid.change_filepath.clicked.connect(self.pathprompt)
-        self.button_setup()
+        # self.grid.change_filepath.clicked.connect(self.pathprompt)
+        # self.button_setup()
+
+        for k, v in self.sliders_dict.items():
+            v.sl.valueChanged.connect(self.update_table)
         
 
 
 
-    def button_setup(self):
+    # def button_setup(self):
         # self.grid.push_vschanges.clicked.connect()
         # self.grid.push_eschanges.clicked.connect()
         # self.grid.push_vschanges.clicked.connect()
         # self.grid.start.clicked.connect()
         # self.grid.stop.clicked.connect()
         # self.grid.change_filepath.clicked.connect()
-        self.grid.test_button.clicked.connect(self.test_func)
+        # self.grid.test_button.clicked.connect(self.test_func)
         
     # def setup(self):
     #     tl = pylon.TlFactory.GetInstance();self.vid.Attach(tl.CreateFirstDevice());self.vid.Open()
@@ -253,16 +268,23 @@ class MazeGUI(QWidget):
         #     img = QImage(frm.data, s, s, QImage.Format.Format_Mono)
         #     cv2.imshow('live video', frm)
 
-    def pathprompt(self):
-        options = QFileDialog.Option.ShowDirsOnly
-        dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
-        file = dlg.getOpenFileName(caption='select the working directory for your project');fname = file[0]
-        self.wdir = fname
-        msg = f'the working directory is: \"{str(fname)}\"'
-        self.grid.path_label.setText(msg)
+    # def pathprompt(self):
+    #     options = QFileDialog.Option.ShowDirsOnly
+    #     dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
+    #     file = dlg.getOpenFileName(caption='select the working directory for your project');fname = file[0]
+    #     self.wdir = fname
+    #     msg = f'the working directory is: \"{str(fname)}\"'
+        # self.grid.path_label.setText(msg)
 
-    def test_func(self):
-        print(self.grid.test_slider.sl.value())
+    # def test_func(self):
+    #     print(self.grid.test_slider.sl.value())
+
+    def update_table(self):
+        for i, (k, v) in enumerate(self.sliders_dict.items()):
+            new_val = str(v.sl.value())
+            self.data_table.item(i, 0).setText(new_val)
+
+        
 
             
 

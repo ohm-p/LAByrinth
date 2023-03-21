@@ -73,6 +73,7 @@ class settings(QObject):
 class processor(QObject):
     frm = pyqtSignal(np.ndarray)
     fin = pyqtSignal()
+    pose_arr = pyqtSignal(np.ndarray)
     
     def __init__(self, model_path, settings):
         super().__init__()
@@ -81,7 +82,7 @@ class processor(QObject):
         else:
             sys.exit('error selecting the correct model.')
         
-        self.main_thread = self.thread()
+        self.main_thread = QThread.currentThread()
         self.settings = settings
         self._run_flag = False
         self.setup();print('camera successfully initiated')
@@ -226,8 +227,12 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     self.times.append([self.end_time, diff])
+<<<<<<< HEAD
         self.poses.append(pose)
         self.out.write(frame)
+=======
+        self.pose_arr.emit(pose)
+>>>>>>> 8adfa0f505f0ff086e269684fe2995065dee63c0
         return mod_frame        
 
     def in_sector(self, x, y):
@@ -476,7 +481,7 @@ class Maze_Controller(QWidget,QObject):
         self.processor = processor(model_path = model_path, settings = self.settings)
         self.processor.frm.connect(self.display_frame)
         self.processor.fin.connect(self.thread_fin)
-        self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread();self.main_thread = QThread.currentThread()
+        self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread()
         self.button_setup()
         self.model_startup()
 
@@ -511,15 +516,17 @@ class Maze_Controller(QWidget,QObject):
         return model_path
 
     def main_processing(self):
+        #commands and pushing new settings
+        self.push_controlssetup_changes()
+        self.processor.write_command(2)
         #get Qthreadpool to keep gui up to date       
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
         self.stream_thread.start()
-        self.push_controlssetup_changes()
-        self.processor.write_command(2)
+ 
 
     def preview(self):
-        self.processor.moveToThread(self.preview_thread)
+        self.processor.moxveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
         self.preview_thread.start()
     
@@ -542,6 +549,10 @@ class Maze_Controller(QWidget,QObject):
         if self.processor.thread() == self.main_thread:
             print('processor successfully reset to self.main_thread')
 
+<<<<<<< HEAD
+=======
+        print('processor successfully reset to the main thread')
+>>>>>>> 8adfa0f505f0ff086e269684fe2995065dee63c0
 
 
     def shutdown_routine(self):
@@ -562,6 +573,10 @@ class Maze_Controller(QWidget,QObject):
         Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(Qframe)
         self.livestream_lbl.setPixmap(pixmap)
+
+    @pyqtSlot(np.ndarray)
+    def update_table(self, pose_arr):
+        pass
 
     def push_videosetup_changes(self):
         a = self.grid.Xdim_vid.sl.value()
