@@ -227,12 +227,9 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     self.times.append([self.end_time, diff])
-<<<<<<< HEAD
         self.poses.append(pose)
         self.out.write(frame)
-=======
         self.pose_arr.emit(pose)
->>>>>>> 8adfa0f505f0ff086e269684fe2995065dee63c0
         return mod_frame        
 
     def in_sector(self, x, y):
@@ -548,11 +545,6 @@ class Maze_Controller(QWidget,QObject):
 
         if self.processor.thread() == self.main_thread:
             print('processor successfully reset to self.main_thread')
-
-<<<<<<< HEAD
-=======
-        print('processor successfully reset to the main thread')
->>>>>>> 8adfa0f505f0ff086e269684fe2995065dee63c0
 
 
     def shutdown_routine(self):
