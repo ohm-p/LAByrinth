@@ -75,9 +75,9 @@ class processor(QObject):
     fin = pyqtSignal()
     pose_arr = pyqtSignal(np.ndarray)
     
-    def __init__(self, model_path, settings):
+    def __init__(self, model_path, settings, main_thread):
         super().__init__()
-        self.main_thread = QThread.currentThread()
+        self.main_thread = main_thread
         if os.path.exists(model_path):
             self.model_path = model_path
         else:
@@ -471,9 +471,9 @@ class Maze_Controller(QWidget,QObject):
         self.grid.change_filepath.clicked.connect(self.pathprompt)
     
         model_path = self.model_pathprompt()
-        self.processor = processor(model_path = model_path, settings = self.settings)
+        self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
         self.processor.frm.connect(self.display_frame)
-        self.processor.fin.connect(self.thread_fin)
+        self.processor.fin.connect(self.thread_fin);self.processor.fin.connect(self.reenable_startandpreview_buttons)
         self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread()
         self.button_setup()
         self.disable_startandpreview_buttons()
@@ -538,12 +538,15 @@ class Maze_Controller(QWidget,QObject):
             # thread.finished.disconnect()
             thread.started.connect(self.processor.reset_thread)
             thread.finished.connect(thread.quit)
-            thread.start();sleep(2)
+            thread.start()
+            sleep(1)
         else:
             print('\'processor\' object is already in the main thread')
 
         if self.processor.thread() == self.main_thread:
             print('processor successfully reset to self.main_thread')
+        else:
+            sys.exit('failed to successfully reset processor object to main thread')
         thread.finished.disconnect();thread.started.disconnect()
         print('connections of thread reset')
 

@@ -475,7 +475,8 @@ class Maze_Controller(QWidget,QObject):
             # thread.finished.disconnect()
             thread.started.connect(self.processor.reset_thread)
             thread.finished.connect(thread.quit)
-            thread.start();sleep(2)
+            thread.start()
+            sleep(1)
         else:
             print('\'processor\' object is already in the main thread')
 
