@@ -168,7 +168,7 @@ class processor(QObject):
         if grab.GrabSucceeded():
             frame = grab.Array
             pose = self.dlc_live.init_inference(frame)
-            mod_frame = frame.copy()
+            mod_frame = np.dstack((frame, frame, frame))
             for i in range(3):
                 coords = (int(pose[i, 0]), int(pose[i, 1]))
                 cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -194,18 +194,19 @@ class processor(QObject):
 
     def idle_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
-        mod_frame = frame.copy()
+        mod_frame = np.dstack((frame, frame, frame))
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
         self.pose_arr.emit(pose)
+        print(pose.shape)
         return mod_frame      
 
 
     def stream_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
-        mod_frame = frame.copy()
+        mod_frame = np.dstack((frame, frame, frame))
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -214,10 +215,12 @@ class processor(QObject):
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
                 #the subject is in the sector, so shock is delivered (turned on if off)
+                cv2.ellipse(mod_frame, ((15, 15), (10, 10), 0), (255, 0, 0), -1)
                 if not self.shock_on:
                     self.ser.write(self.command(5))
                     self.start_shock = time.perf_counter()
-                    self.shock_on = True             
+                    self.shock_on = True
+                                
         else:
                 #shock is not delivered since the subject is not in the sector (turned off if on)
                 if self.shock_on:
@@ -553,7 +556,8 @@ class Maze_Controller(QWidget,QObject):
 
     def shutdown_routine(self):
         #add all shutdown commands here
-        self.processor.write_command(self.processor.command(3));self.processor.write_command(self.processor.command(6))
+        self.processor._run_flag = False
+        self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
         self.processor.out.release()
@@ -566,8 +570,7 @@ class Maze_Controller(QWidget,QObject):
 
     @pyqtSlot(np.ndarray)
     def display_frame(self, frame):
-        Qframe = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
+        Qframe = QImage(frame, frame.shape[1], frame.shape[0], frame.strides[0],QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(Qframe)
         self.livestream_lbl.setPixmap(pixmap)
 
