@@ -240,9 +240,8 @@ class processor(QObject):
 
     def in_sector(self, x, y):
         vec_1 = np.array([x, y])
-        vec_2 = self.res/2
-        diff = vec_1 - vec_2;ratio = diff[1]/diff[0]
-        theta = np.degrees(np.arctan(ratio))
+        vec_2 = np.array((self.x_cen, self.y_cen))
+        diff = vec_2 - vec_1;theta = np.degrees(np.arctan2(diff[1], diff[0]))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
         upper = self.angle_center + 30; lower = self.angle_center - 30
         if (theta < upper and theta > lower):
