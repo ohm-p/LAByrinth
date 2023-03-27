@@ -29,7 +29,7 @@ class Gui_updater(QThread):
         frame_height = int(raw_video.get(3))
         frame_width = int(raw_video.get(4))
         size = (frame_height,frame_width)
-        video_file_name = dt_name_string+"_maze_trial.avi"
+        video_file_name = "C:\\tracking_system\\_OHM\\vids\\" + dt_name_string+"_maze_trial.avi"
         result = cv2.VideoWriter(video_file_name, cv2.VideoWriter_fourcc(*'MJPG'), 10, size)
         while self._gui_run_flag:
             retrieved, frame = raw_video.read()
@@ -38,6 +38,7 @@ class Gui_updater(QThread):
                 #Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
                 #pixmap = QPixmap.fromImage(Qframe)
                 result.write(frame)
+                print(type(frame));print(frame.shape)
                 self.update_image.emit(frame)
         print('releasing video')     
         raw_video.release()

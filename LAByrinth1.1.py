@@ -95,11 +95,12 @@ class processor(QObject):
         # path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
         path = "C:\\tracking_system\\_OHM\\vids\\"
         self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
-        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (self.H, self.W)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = int(30.0);frameSize = (self.H, self.W)
+        print(frameSize)
         vid_path = path +  self.dt + "_recording.avi"
-        self.poses_path = path + self.dt + "_poses.txt"
+        self.poses_path = path + self.dt + "_poses.npy"
         self.times_path = path + self.dt + "_times.txt"
-        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
+        # self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.out = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'MJPG'), fps, frameSize)
         self.shock_on = False
         self.times = []
@@ -206,7 +207,8 @@ class processor(QObject):
 
     def stream_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
-        mod_frame = np.dstack((frame, frame, frame))
+        triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
+        self.out.write
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -231,8 +233,8 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     self.times.append([self.end_time, diff])
+        self.out.write(triple_frame)
         self.poses.append(pose)
-        self.out.write(frame)
         self.pose_arr.emit(pose)
         return mod_frame        
 
@@ -560,10 +562,11 @@ class Maze_Controller(QWidget,QObject):
         self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
-        self.processor.out.release()
+        self.processor.out.release();print('video successfully saved')
         self.settings.save_settings_func()
-        np.savetxt(self.processor.poses_path, self.processor.poses, delimiter = ', ')
-        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ')
+        np.save(self.processor.poses_path, self.processor.poses)
+        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
+        print('data successfully saved')
         # self.close()
         sys.exit('shutdown routine activated')    
     
