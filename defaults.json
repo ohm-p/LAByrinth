@@ -1,0 +1,17 @@
+{
+    
+    "controls" : {
+        "rpm" : 1,
+        "current" : 0.5,
+        "sector_center" : 0
+    },
+    "video": {
+        "height" : 455,
+        "width" : 455,
+        "x_offset" : 118,
+        "y_offset" : 62,
+        "x_center":223,
+        "y_center":223  
+    }
+    
+    }
