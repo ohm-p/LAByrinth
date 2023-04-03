@@ -154,7 +154,7 @@ class processor(QObject):
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
                 frame = grab.Array
-                mod_frame = self.stream_process(frame)
+                mod_frame = self.stream_process_retention(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
@@ -204,6 +204,36 @@ class processor(QObject):
         print(pose.shape)
         return mod_frame      
 
+    def stream_process_retention(self, frame):
+        pose = self.dlc_live.get_pose(frame) 
+        triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
+        self.out.write
+        for i in range(3):
+            coords = (int(pose[i, 0]), int(pose[i, 1]))
+            cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+        cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        if(self.in_sector(pose[0,0], pose[0,1])
+            and self.in_sector(pose[1,0], pose[1,1])
+            and self.in_sector(pose[2,0], pose[2,1])):
+                #the subject is in the sector, so shock is delivered (turned on if off)
+                cv2.ellipse(mod_frame, ((15, 15), (10, 10), 0), (255, 0, 0), -1)
+                if not self.shock_on:
+                    self.start_shock = time.perf_counter()
+                    self.shock_on = True
+                                
+        else:
+                #shock is not delivered since the subject is not in the sector (turned off if on)
+                if self.shock_on:
+                    self.end_shock = time.perf_counter()
+                    self.end_time = time.strftime("%H.%M.%S")
+                    self.shock_on = False
+                    #notes the time that the shock ended, subtracts from start and adds to the array
+                    diff = self.end_shock - self.start_shock
+                    self.times.append([self.end_time, diff])
+        self.out.write(triple_frame)
+        self.poses.append(pose)
+        self.pose_arr.emit(pose)
+        return mod_frame  
 
     def stream_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
@@ -264,13 +294,10 @@ class processor(QObject):
          return bytearray(l)
     
     def shockandrotation_setup(self, shock, rotation):
-        self.commands[0][1] = shock
-        self.commands[3][1] = rotation
-
-        shock_setup_command = self.command(4)
-        rotation_setup_command = self.command(1)
-        self.ser.write(shock_setup_command)
-        self.ser.write(rotation_setup_command)
+        self.commands[3][1] = shock
+        self.commands[0][1] = rotation
+        self.write_command(4)
+        self.write_command(1)
 
     def write_command(self, i:int):
         self.ser.write(self.command(i))
@@ -385,8 +412,8 @@ class QGB(QGridLayout):
         self.Xdim_vid = hslider('X dim:', 0, 582, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
 
-        self.Xpos_vid = hslider('X pan:', -100, 100, 10, x_off)
-        self.Ypos_vid = hslider('Y pan:', -100, 100, 10, y_off)
+        self.Xpos_vid = hslider('X pan:', 0, int(582 - h), 10, x_off)
+        self.Ypos_vid = hslider('Y pan:', 0, int(582 - w), 10, y_off)
 
         
         self.Xcenter_vid = hslider('X of center pt:', 0, 784, 1, x_cen)
@@ -403,12 +430,13 @@ class QGB(QGridLayout):
 
     def cs_layout(self):
         cs_layout = QVBoxLayout()
+        r, s, c = self.settings.pull(('controls',)).values()
 
-        self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, 5)
+        self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, s)
 
-        self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, 5)
+        self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, r)
 
-        self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, 0)
+        self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, c)
 
         cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.sector_center);cs_layout.addWidget(self.push_cschanges)
         return cs_layout
@@ -597,11 +625,12 @@ class Maze_Controller(QWidget,QObject):
         print('successfully pushed video setup changes')
 
     def push_controlssetup_changes(self):
-        a = self.grid.shock_setup.sl.value()
         b = self.grid.rotation_setup.sl.value()
+        a = self.grid.shock_setup.sl.value()
         c = self.grid.sector_center.sl.value()
         self.processor.shockandrotation_setup(a, b)
-        self.settings.push_c((a, b, c))
+        print(a, b)
+        self.settings.push_c((b, a, c))
         print('successfully pushed controls setup changes')
 
     def reenable_startandpreview_buttons(self):
