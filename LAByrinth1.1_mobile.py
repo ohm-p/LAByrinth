@@ -137,7 +137,7 @@ class processor(QObject):
         while self._run_flag:
             ret, frame = self.vid.read()
             if ret:
-                mod_frame = self.idle_process(frame)
+                mod_frame = self.mobile_process(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
@@ -166,7 +166,7 @@ class processor(QObject):
         mod_frame = frame.copy()
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
         self.out.write(frame)
-        self.init_pose();self.pose_arr.emit(self.pose)
+        self.pose_arr.emit(self.init_pose())
         for i in range(3):
             coords = (int(self.pose[i, 0]), int(self.pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -205,18 +205,16 @@ class processor(QObject):
         shock_setup_command = self.command(4)
         rotation_setup_command = self.command(1)
 
-    def move_thread(self, thread:QThread):
-        self.moveToThread(thread)
-
     def reset_thread(self):
        self.moveToThread(self.main_thread)
 
     def init_pose(self):
         lis = []
         for i in range(3):
-            current = [random.randint(0, 500), random.randint(0, 500), random.random()]
+            current = [int(random.randint(0, 500)), int(random.randint(0, 500)), random.random()]
             lis.append(current)
-        self.pose = np.array(lis)
+        self.pose = np.array(lis)   
+        return(self.pose)
  
 
 class hslider(QWidget):
@@ -250,7 +248,7 @@ class hslider(QWidget):
         self.txt.setText(f'{self.sl.sliderPosition()}')
 
     def text_updates_slider(self):
-        self.sl.setSliderPosition(float(self.txt.text()))
+        self.sl.setSliderPosition(int(self.txt.text()))
 
 class vslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -384,9 +382,7 @@ class QGB(QGridLayout):
 class Maze_Controller(QWidget,QObject):
     def __init__(self):
         super().__init__()
-
-    # self.vid = pylon.InstantCamera();self.setup()
-    # self.conv = pylon.ImageFormatConverter()
+        self.main_thread = QThread.currentThread()
         self.settings = settings()
 
         self.setWindowTitle('MazeController')
@@ -418,11 +414,11 @@ class Maze_Controller(QWidget,QObject):
     
         self.processor = processor(settings = self.settings)
         self.processor.frm.connect(self.display_frame)
-        self.processor.fin.connect(self.thread_fin)
+        self.processor.fin.connect(self.thread_fin);self.processor.fin.connect(self.reenable_startandpreview_buttons)
         self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread()
         self.button_setup()
+        self.disable_startandpreview_buttons()
         self.model_startup()
-
         self.settings.sig.connect(self.update_settings)
 
     @pyqtSlot(dict)
@@ -438,6 +434,8 @@ class Maze_Controller(QWidget,QObject):
         self.grid.preview.clicked.connect(self.preview)
         self.grid.stop.clicked.connect(self.shutdown_routine)
         self.grid.change_filepath.clicked.connect(self.pathprompt)
+        self.grid.start.clicked.connect(self.disable_startandpreview_buttons);self.grid.preview.clicked.connect(self.disable_startandpreview_buttons)
+        self.processor.pose_arr.connect(self.update_pose_table)
 
     def pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
@@ -448,18 +446,22 @@ class Maze_Controller(QWidget,QObject):
         self.grid.path_label.setText(msg)
 
     def main_processing(self):
+        # self.stream_thread.finished.disconnect();self.stream_thread.started.disconnect()
         self.push_controlssetup_changes()
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
         self.stream_thread.start()
  
-
     def preview(self):
+        # self.preview_thread.finished.disconnect();self.preview_thread.started.disconnect()
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
         self.preview_thread.start()
     
     def model_startup(self):
+        # self.isSignalConnected(self.getsignal)
+        # model_startup_thread.finished.
+        # self.model_startup_thread.finished.disconnect();self.model_startup_thread.started.disconnect()
         #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
         self.processor.moveToThread(self.model_startup_thread)
         self.model_startup_thread.started.connect(self.processor.model_startup)
@@ -467,23 +469,26 @@ class Maze_Controller(QWidget,QObject):
 
     def thread_fin(self):
         thread = self.processor.thread()
-        if thread != QThread.currentThread:
+        if thread != self.main_thread:
             thread.quit()
             thread.started.disconnect()
             # thread.finished.disconnect()
             thread.started.connect(self.processor.reset_thread)
             thread.finished.connect(thread.quit)
-            thread.start();sleep(2)
+            thread.start()
+            sleep(1)
         else:
-            pass
+            print('\'processor\' object is already in the main thread')
 
         if self.processor.thread() == self.main_thread:
-            print('processor successfully reset to self.main_thread')
+            print('processor location successfully reset to self.main_thread')
+        thread.finished.disconnect();thread.started.disconnect()
+        print('connections of thread reset')
 
 
     def shutdown_routine(self):
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
-        self.processor.vid.Close()
+        self.processor.vid.release()
         self.processor.out.release()
         self.settings.save_settings_func()
 
@@ -499,8 +504,15 @@ class Maze_Controller(QWidget,QObject):
         self.livestream_lbl.setPixmap(pixmap)
 
     @pyqtSlot(np.ndarray)
-    def update_table(self, pose_arr):
-        pass
+    def update_pose_table(self, pose):
+        if pose.shape == (3, 3):
+            for i in range(3):
+                for j in range(3):
+                    new_item = QTableWidgetItem(str(pose[i][j]))
+                    self.data_table.setItem(i, j, new_item)
+        else:
+            self.shutdown_routine()
+            # sys.exit('a pose of incorrect dimensions was passed: expected dimensions were (3x3)')
 
     def push_videosetup_changes(self):
         a = self.grid.Xdim_vid.sl.value()
@@ -510,6 +522,7 @@ class Maze_Controller(QWidget,QObject):
         e = self.grid.Xcenter_vid.sl.value()
         f = self.grid.Ycenter_vid.sl.value()
         self.settings.push_v((a, b, c, d, e, f))
+        print('successfully pushed video setup changes')
 
     def push_controlssetup_changes(self):
         a = self.grid.shock_setup.sl.value()
@@ -517,6 +530,7 @@ class Maze_Controller(QWidget,QObject):
         c = self.grid.sector_center.sl.value()
         self.processor.shockandrotation_setup(a, b)
         self.settings.push_c((a, b, c))
+        print('successfully pushed controls setup changes')
 
 
     @pyqtSlot()
@@ -529,6 +543,14 @@ class Maze_Controller(QWidget,QObject):
             with open('settings.json', 'w') as outfile:
                 json.dump(self.settings.settings, outfile)
                 print('no \'settings.json\' exists. new file created and settings saved')
+
+    def reenable_startandpreview_buttons(self):
+        self.grid.start.setEnabled(True)
+        self.grid.preview.setEnabled(True)
+
+    def disable_startandpreview_buttons(self):
+        self.grid.start.setEnabled(False)
+        self.grid.preview.setEnabled(False)
 
 
 

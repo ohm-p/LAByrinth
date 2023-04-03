@@ -75,9 +75,9 @@ class processor(QObject):
     fin = pyqtSignal()
     pose_arr = pyqtSignal(np.ndarray)
     
-    def __init__(self, model_path, settings):
+    def __init__(self, model_path, settings, main_thread):
         super().__init__()
-        self.main_thread = QThread.currentThread()
+        self.main_thread = main_thread
         if os.path.exists(model_path):
             self.model_path = model_path
         else:
@@ -95,11 +95,12 @@ class processor(QObject):
         # path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
         path = "C:\\tracking_system\\_OHM\\vids\\"
         self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
-        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = 30.0;frameSize = (self.H, self.W)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = int(30.0);frameSize = (self.H, self.W)
+        print(frameSize)
         vid_path = path +  self.dt + "_recording.avi"
-        self.poses_path = path + self.dt + "_poses.txt"
+        self.poses_path = path + self.dt + "_poses.npy"
         self.times_path = path + self.dt + "_times.txt"
-        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
+        # self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.out = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'MJPG'), fps, frameSize)
         self.shock_on = False
         self.times = []
@@ -153,7 +154,7 @@ class processor(QObject):
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
                 frame = grab.Array
-                mod_frame = self.stream_process(frame)
+                mod_frame = self.stream_process_retention(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
@@ -168,7 +169,7 @@ class processor(QObject):
         if grab.GrabSucceeded():
             frame = grab.Array
             pose = self.dlc_live.init_inference(frame)
-            mod_frame = frame.copy()
+            mod_frame = np.dstack((frame, frame, frame))
             for i in range(3):
                 coords = (int(pose[i, 0]), int(pose[i, 1]))
                 cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -194,18 +195,19 @@ class processor(QObject):
 
     def idle_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
-        mod_frame = frame.copy()
+        mod_frame = np.dstack((frame, frame, frame))
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
         self.pose_arr.emit(pose)
+        print(pose.shape)
         return mod_frame      
 
-
-    def stream_process(self, frame):
+    def stream_process_retention(self, frame):
         pose = self.dlc_live.get_pose(frame) 
-        mod_frame = frame.copy()
+        triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
+        self.out.write
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
@@ -214,10 +216,43 @@ class processor(QObject):
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
                 #the subject is in the sector, so shock is delivered (turned on if off)
+                cv2.ellipse(mod_frame, ((15, 15), (10, 10), 0), (255, 0, 0), -1)
+                if not self.shock_on:
+                    self.start_shock = time.perf_counter()
+                    self.shock_on = True
+                                
+        else:
+                #shock is not delivered since the subject is not in the sector (turned off if on)
+                if self.shock_on:
+                    self.end_shock = time.perf_counter()
+                    self.end_time = time.strftime("%H.%M.%S")
+                    self.shock_on = False
+                    #notes the time that the shock ended, subtracts from start and adds to the array
+                    diff = self.end_shock - self.start_shock
+                    self.times.append([self.end_time, diff])
+        self.out.write(triple_frame)
+        self.poses.append(pose)
+        self.pose_arr.emit(pose)
+        return mod_frame  
+
+    def stream_process(self, frame):
+        pose = self.dlc_live.get_pose(frame) 
+        triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
+        self.out.write
+        for i in range(3):
+            coords = (int(pose[i, 0]), int(pose[i, 1]))
+            cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+        cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        if(self.in_sector(pose[0,0], pose[0,1])
+            and self.in_sector(pose[1,0], pose[1,1])
+            and self.in_sector(pose[2,0], pose[2,1])):
+                #the subject is in the sector, so shock is delivered (turned on if off)
+                cv2.ellipse(mod_frame, ((15, 15), (10, 10), 0), (255, 0, 0), -1)
                 if not self.shock_on:
                     self.ser.write(self.command(5))
                     self.start_shock = time.perf_counter()
-                    self.shock_on = True             
+                    self.shock_on = True
+                                
         else:
                 #shock is not delivered since the subject is not in the sector (turned off if on)
                 if self.shock_on:
@@ -228,16 +263,15 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     self.times.append([self.end_time, diff])
+        self.out.write(triple_frame)
         self.poses.append(pose)
-        self.out.write(frame)
         self.pose_arr.emit(pose)
         return mod_frame        
 
     def in_sector(self, x, y):
         vec_1 = np.array([x, y])
-        vec_2 = self.res/2
-        diff = vec_1 - vec_2;ratio = diff[1]/diff[0]
-        theta = np.degrees(np.arctan(ratio))
+        vec_2 = np.array((self.x_cen, self.y_cen))
+        diff = vec_2 - vec_1;theta = np.degrees(np.arctan2(diff[1], diff[0]))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
         upper = self.angle_center + 30; lower = self.angle_center - 30
         if (theta < upper and theta > lower):
@@ -260,13 +294,10 @@ class processor(QObject):
          return bytearray(l)
     
     def shockandrotation_setup(self, shock, rotation):
-        self.commands[0][1] = shock
-        self.commands[3][1] = rotation
-
-        shock_setup_command = self.command(4)
-        rotation_setup_command = self.command(1)
-        self.ser.write(shock_setup_command)
-        self.ser.write(rotation_setup_command)
+        self.commands[3][1] = shock
+        self.commands[0][1] = rotation
+        self.write_command(4)
+        self.write_command(1)
 
     def write_command(self, i:int):
         self.ser.write(self.command(i))
@@ -381,8 +412,8 @@ class QGB(QGridLayout):
         self.Xdim_vid = hslider('X dim:', 0, 582, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
 
-        self.Xpos_vid = hslider('X pan:', -100, 100, 10, x_off)
-        self.Ypos_vid = hslider('Y pan:', -100, 100, 10, y_off)
+        self.Xpos_vid = hslider('X pan:', 0, int(582 - h), 10, x_off)
+        self.Ypos_vid = hslider('Y pan:', 0, int(582 - w), 10, y_off)
 
         
         self.Xcenter_vid = hslider('X of center pt:', 0, 784, 1, x_cen)
@@ -399,12 +430,13 @@ class QGB(QGridLayout):
 
     def cs_layout(self):
         cs_layout = QVBoxLayout()
+        r, s, c = self.settings.pull(('controls',)).values()
 
-        self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, 5)
+        self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, s)
 
-        self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, 5)
+        self.rotation_setup = vslider('Rotation Speed (rpm):', 1, 25, 1, r)
 
-        self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, 0)
+        self.sector_center = vslider('Center of the sector (+/- 30deg):', 0, 360, 1, c)
 
         cs_layout.addWidget(self.shock_setup);cs_layout.addWidget(self.rotation_setup);cs_layout.addWidget(self.sector_center);cs_layout.addWidget(self.push_cschanges)
         return cs_layout
@@ -471,9 +503,9 @@ class Maze_Controller(QWidget,QObject):
         self.grid.change_filepath.clicked.connect(self.pathprompt)
     
         model_path = self.model_pathprompt()
-        self.processor = processor(model_path = model_path, settings = self.settings)
+        self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
         self.processor.frm.connect(self.display_frame)
-        self.processor.fin.connect(self.thread_fin)
+        self.processor.fin.connect(self.thread_fin);self.processor.fin.connect(self.reenable_startandpreview_buttons)
         self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread()
         self.button_setup()
         self.disable_startandpreview_buttons()
@@ -538,33 +570,37 @@ class Maze_Controller(QWidget,QObject):
             # thread.finished.disconnect()
             thread.started.connect(self.processor.reset_thread)
             thread.finished.connect(thread.quit)
-            thread.start();sleep(2)
+            thread.start()
+            sleep(1)
         else:
             print('\'processor\' object is already in the main thread')
 
         if self.processor.thread() == self.main_thread:
             print('processor successfully reset to self.main_thread')
+        else:
+            sys.exit('failed to successfully reset processor object to main thread')
         thread.finished.disconnect();thread.started.disconnect()
         print('connections of thread reset')
 
 
     def shutdown_routine(self):
         #add all shutdown commands here
-        self.processor.write_command(self.processor.command(3));self.processor.write_command(self.processor.command(6))
+        self.processor._run_flag = False
+        self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
-        self.processor.out.release()
+        self.processor.out.release();print('video successfully saved')
         self.settings.save_settings_func()
-        np.savetxt(self.processor.poses_path, self.processor.poses, delimiter = ', ')
-        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ')
+        np.save(self.processor.poses_path, self.processor.poses)
+        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
+        print('data successfully saved')
         # self.close()
         sys.exit('shutdown routine activated')    
     
 
     @pyqtSlot(np.ndarray)
     def display_frame(self, frame):
-        Qframe = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        Qframe = QImage(Qframe, Qframe.shape[1], Qframe.shape[0], Qframe.strides[0],QImage.Format.Format_RGB888)
+        Qframe = QImage(frame, frame.shape[1], frame.shape[0], frame.strides[0],QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(Qframe)
         self.livestream_lbl.setPixmap(pixmap)
 
@@ -589,11 +625,12 @@ class Maze_Controller(QWidget,QObject):
         print('successfully pushed video setup changes')
 
     def push_controlssetup_changes(self):
-        a = self.grid.shock_setup.sl.value()
         b = self.grid.rotation_setup.sl.value()
+        a = self.grid.shock_setup.sl.value()
         c = self.grid.sector_center.sl.value()
         self.processor.shockandrotation_setup(a, b)
-        self.settings.push_c((a, b, c))
+        print(a, b)
+        self.settings.push_c((b, a, c))
         print('successfully pushed controls setup changes')
 
     def reenable_startandpreview_buttons(self):
