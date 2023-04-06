@@ -72,8 +72,8 @@ class settings(QObject):
 
 class processor(QObject):
     frm = pyqtSignal(np.ndarray)
-    fin = pyqtSignal()
     pose_arr = pyqtSignal(np.ndarray)
+    times_up = pyqtSignal()
     
     def __init__(self, model_path, settings, main_thread):
         super().__init__()
@@ -126,6 +126,7 @@ class processor(QObject):
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
         self.settings.sig.connect(self.update_settings)
+        self.trial_duration = None
         
     @pyqtSlot(dict)
     def update_settings(self, new_settings):
@@ -145,7 +146,7 @@ class processor(QObject):
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
-        sleep(1);self.fin.emit()
+        self.thread().quit()
         
     def grab_stream(self):
         self.setup()
@@ -159,9 +160,10 @@ class processor(QObject):
             else:
                 sys.exit('cam failed to cap frame')
                 break
+            self.check_time()
         grab.Release()
         self.vid.Close()
-        sleep(1);self.fin.emit()
+        self.thread().quit()
 
     def model_startup(self):
         self.setup()
@@ -178,7 +180,7 @@ class processor(QObject):
             sys.exit('cam failed to cap frame')
         grab.Release()
         self.vid.Close()
-        sleep(1);self.fin.emit()
+        self.thread().quit()
 
     def change_settings(self, new_settings):
         self.settings.settings = new_settings
@@ -236,6 +238,7 @@ class processor(QObject):
         return mod_frame  
 
     def stream_process(self, frame):
+        self.trial_start_time = time.perf_counter()
         pose = self.dlc_live.get_pose(frame) 
         triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
         self.out.write
@@ -251,6 +254,7 @@ class processor(QObject):
                 if not self.shock_on:
                     self.ser.write(self.command(5))
                     self.start_shock = time.perf_counter()
+                    self.start_time = time.perf_counter() - self.trial_start_time
                     self.shock_on = True
                                 
         else:
@@ -258,11 +262,10 @@ class processor(QObject):
                 if self.shock_on:
                     self.ser.write(self.command(6))
                     self.end_shock = time.perf_counter()
-                    self.end_time = time.strftime("%H.%M.%S")
                     self.shock_on = False
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
-                    self.times.append([self.end_time, diff])
+                    self.times.append([self.start_time, diff])
         self.out.write(triple_frame)
         self.poses.append(pose)
         self.pose_arr.emit(pose)
@@ -303,8 +306,34 @@ class processor(QObject):
         self.ser.write(self.command(i))
 
     def reset_thread(self):
-       self.moveToThread(self.main_thread)
+        prev_thread = self.thread()
+        prev_thread.started.disconnect()
+        self.moveToThread(self.main_thread)
+        prev_thread.quit()
+
+    def check_time(self):
+        running_time = time.perf_counter() - self.trial_start_time
+        if not running_time < (self.trial_duration)*60:
+            self.times_up.emit()
+        
     
+
+class textbox(QWidget):
+    def __init__(self, wname, startval, orientation = Qt.Orientation.Horizontal):
+        super().__init__()
+
+        self.name = wname
+        self.layout = QHBoxLayout
+        self.lbl = QLabel(alignment = Qt.AlignmentFlag.AlignLeft, text = f'{self.name}')
+        self.lbl.setFixedWidth(150)
+
+        self.txt = QLineEdit(alignment = Qt.AlignmentFlag.AlignCenter, text = f'{startval}')
+        self.txt.setValidator(QDoubleValidator(bottom = float(0), decimals = 1, top = 60))
+        self.txt.setFixedWidth(150)
+
+        self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt)
+        self.setLayout(self.layout)
+
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -424,8 +453,8 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
-
-        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges)
+        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(30))
+        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
         return es_layout
 
     def cs_layout(self):
@@ -494,9 +523,7 @@ class Maze_Controller(QWidget,QObject):
         self.tab_dict = {'livestream':livestream_widget, 'buttons':buttons}
         for k, v in self.tab_dict.items():
             self.tabs.addTab(v, k)
-        self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)
-        self.setLayout(self.main_layout)
-    
+        self.main_layout = QHBoxLayout();self.main_layout.addWidget(self.tabs)    
         # self.tabs.addTab(self.livestream, 'livestream')
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
@@ -504,17 +531,21 @@ class Maze_Controller(QWidget,QObject):
     
         model_path = self.model_pathprompt()
         self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
-        self.processor.frm.connect(self.display_frame)
-        self.processor.fin.connect(self.thread_fin);self.processor.fin.connect(self.reenable_startandpreview_buttons)
-        self.preview_thread = QThread();self.stream_thread = QThread();self.model_startup_thread = QThread()
-        self.button_setup()
+        self.create_threads();self.button_setup()
         self.disable_startandpreview_buttons()
-        self.model_startup()
         self.settings.sig.connect(self.update_settings)
+        self.setLayout(self.main_layout)
+        self.model_startup()
+
 
     @pyqtSlot(dict)
     def update_settings(self, new_settings):
         self.settings.settings = new_settings
+
+    def create_threads(self):
+        self.preview_thread = QThread() #this is likely the most active thread, as the preview will be done multiple times 
+        self.stream_thread = QThread() #this thread is gonna be used once as well, and it usually the last thread used
+        self.model_startup_thread = QThread() #this one is only used once        self.preview_thread.finished.connect(self.preview_thread.quit);self.stream_thread.finished.connect(self.stream_thread.quit);self.model_startup_thread.finished.connect(self.model_startup_thread.quit)
 
     def button_setup(self):
         self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
@@ -527,6 +558,9 @@ class Maze_Controller(QWidget,QObject):
         self.grid.change_filepath.clicked.connect(self.pathprompt)
         self.grid.start.clicked.connect(self.disable_startandpreview_buttons);self.grid.preview.clicked.connect(self.disable_startandpreview_buttons)
         self.processor.pose_arr.connect(self.update_pose_table)
+        self.grid.trial_duration_widget.txt.editingFinished.connect(self.update_trial_duration)
+        self.processor.frm.connect(self.display_frame)
+        self.processor.times_up.connect(self.shutdown_routine)
 
     def pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
@@ -546,20 +580,23 @@ class Maze_Controller(QWidget,QObject):
         #commands and pushing new settings
         self.push_controlssetup_changes()
         self.processor.write_command(2)
-        #get Qthreadpool to keep gui up to date       
+        #actual thread execution       
         self.processor.moveToThread(self.stream_thread)
         self.stream_thread.started.connect(self.processor.grab_stream)
+        self.stream_thread.finished.connect(self.thread_done)
         self.stream_thread.start()
  
     def preview(self):
         self.processor.moveToThread(self.preview_thread)
         self.preview_thread.started.connect(self.processor.grab_single)
+        self.preview_thread.finished.connect(self.thread_done)
         self.preview_thread.start()
     
     def model_startup(self):
         #as encountered in a previous iteration, a special function called 'init_inference' must be called to instanitate the tensorflow ('tf') object -- idk
         self.processor.moveToThread(self.model_startup_thread)
         self.model_startup_thread.started.connect(self.processor.model_startup)
+        self.model_startup_thread.finished.connect(self.thread_done)
         self.model_startup_thread.start()
 
     def thread_fin(self):
@@ -581,6 +618,14 @@ class Maze_Controller(QWidget,QObject):
             sys.exit('failed to successfully reset processor object to main thread')
         thread.finished.disconnect();thread.started.disconnect()
         print('connections of thread reset')
+    
+    def thread_done(self):
+        thread = self.processor.thread()
+        thread.started.disconnect();thread.finished.disconnect()
+        thread.started.connect(self.processor.reset_thread)
+        thread.start()
+
+        print('thread successfully reset')
 
 
     def shutdown_routine(self):
@@ -641,6 +686,9 @@ class Maze_Controller(QWidget,QObject):
         self.grid.start.setEnabled(False)
         self.grid.preview.setEnabled(False)
 
+    def update_trial_duration(self):
+        self.processor.trial_duration = self.grid.trial_duration_widget.txt.text()
+        print('trial duration successfully updated.')
 
     @pyqtSlot()
     def save_settings(self):
