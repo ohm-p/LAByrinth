@@ -126,7 +126,7 @@ class processor(QObject):
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
         self.settings.sig.connect(self.update_settings)
-        self.trial_duration = None
+        self.trial_duration = float(.5)
         
     @pyqtSlot(dict)
     def update_settings(self, new_settings):
@@ -151,11 +151,12 @@ class processor(QObject):
     def grab_stream(self):
         self.setup()
         self._run_flag = True
+        self.trial_start_time = time.perf_counter()
         while self._run_flag:
             grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
             if grab.GrabSucceeded():
                 frame = grab.Array
-                mod_frame = self.stream_process_retention(frame)
+                mod_frame = self.stream_process(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
@@ -238,7 +239,6 @@ class processor(QObject):
         return mod_frame  
 
     def stream_process(self, frame):
-        self.trial_start_time = time.perf_counter()
         pose = self.dlc_live.get_pose(frame) 
         triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
         self.out.write
@@ -323,8 +323,8 @@ class textbox(QWidget):
         super().__init__()
 
         self.name = wname
-        self.layout = QHBoxLayout
-        self.lbl = QLabel(alignment = Qt.AlignmentFlag.AlignLeft, text = f'{self.name}')
+        self.layout = QHBoxLayout()
+        self.lbl = QLabel(alignment = Qt.AlignmentFlag.AlignVCenter, text = f'{self.name}')
         self.lbl.setFixedWidth(150)
 
         self.txt = QLineEdit(alignment = Qt.AlignmentFlag.AlignCenter, text = f'{startval}')
@@ -453,7 +453,7 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
-        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(30))
+        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(.5))
         es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
         return es_layout
 
@@ -608,7 +608,7 @@ class Maze_Controller(QWidget,QObject):
             thread.started.connect(self.processor.reset_thread)
             thread.finished.connect(thread.quit)
             thread.start()
-            sleep(1)
+            # sleep(1)
         else:
             print('\'processor\' object is already in the main thread')
 
@@ -622,7 +622,7 @@ class Maze_Controller(QWidget,QObject):
     def thread_done(self):
         thread = self.processor.thread()
         thread.started.disconnect();thread.finished.disconnect()
-        thread.started.connect(self.processor.reset_thread)
+        thread.started.connect(self.processor.reset_thread);thread.finished.connect(self.reenable_startandpreview_buttons)
         thread.start()
 
         print('thread successfully reset')
