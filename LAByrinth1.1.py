@@ -126,7 +126,7 @@ class processor(QObject):
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
         self.settings.sig.connect(self.update_settings)
-        self.trial_duration = float(.5)
+        self.trial_duration = self.settings.pull(('controls', 'trial_duration'))
         
     @pyqtSlot(dict)
     def update_settings(self, new_settings):
@@ -215,6 +215,8 @@ class processor(QObject):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        node1 = self.return_pt2(30);node2 = self.return_pt2(-30)
+        cv2.arrowedLine(mod_frame, self.center, node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, node2, (255, 0, 0), 2)
         if(self.in_sector(pose[0,0], pose[0,1])
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
@@ -246,6 +248,8 @@ class processor(QObject):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        node1 = self.return_pt2(30);node2 = self.return_pt2(-30)
+        cv2.arrowedLine(mod_frame, self.center, node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, node2, (255, 0, 0), 2)
         if(self.in_sector(pose[0,0], pose[0,1])
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
@@ -274,7 +278,7 @@ class processor(QObject):
     def in_sector(self, x, y):
         vec_1 = np.array([x, y])
         vec_2 = np.array((self.x_cen, self.y_cen))
-        diff = vec_2 - vec_1;theta = np.degrees(np.arctan2(diff[1], diff[0]))
+        diff = vec_1 - vec_2;theta = np.degrees(np.arctan2(diff[1], diff[0]))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
         upper = self.angle_center + 30; lower = self.angle_center - 30
         if (theta < upper and theta > lower):
@@ -307,14 +311,21 @@ class processor(QObject):
 
     def reset_thread(self):
         prev_thread = self.thread()
-        prev_thread.started.disconnect()
+        prev_thread.started.disconnect() 
         self.moveToThread(self.main_thread)
         prev_thread.quit()
 
     def check_time(self):
         running_time = time.perf_counter() - self.trial_start_time
-        if not running_time < (self.trial_duration)*60:
+        if not running_time < (float(self.trial_duration))*60:
             self.times_up.emit()
+
+    def return_pt2(self, delta_angle):
+        start = np.array(self.center)
+        angle = self.angle_center + delta_angle
+        pt2 = self.center + 275*np.array((np.cos(np.radians(angle)), np.sin(np.radians(angle))))
+        return tuple(pt2.astype(int))
+
         
     
 
@@ -453,13 +464,14 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
-        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(.5))
+        starting_duration = self.settings.pull(('controls', 'trial_duration'))
+        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = starting_duration)
         es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
         return es_layout
 
     def cs_layout(self):
         cs_layout = QVBoxLayout()
-        r, s, c = self.settings.pull(('controls',)).values()
+        r, s, c, t_d = self.settings.pull(('controls',)).values()
 
         self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, s)
 
@@ -670,12 +682,14 @@ class Maze_Controller(QWidget,QObject):
         print('successfully pushed video setup changes')
 
     def push_controlssetup_changes(self):
-        b = self.grid.rotation_setup.sl.value()
+        self.update_trial_duration()
         a = self.grid.shock_setup.sl.value()
+        b = self.grid.rotation_setup.sl.value()
         c = self.grid.sector_center.sl.value()
+        d = self.processor.trial_duration
         self.processor.shockandrotation_setup(a, b)
         print(a, b)
-        self.settings.push_c((b, a, c))
+        self.settings.push_c((b, a, c, d))
         print('successfully pushed controls setup changes')
 
     def reenable_startandpreview_buttons(self):

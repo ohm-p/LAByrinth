@@ -3,7 +3,8 @@
     "controls" : {
         "rpm" : 1,
         "current" : 0.5,
-        "sector_center" : 0
+        "sector_center" : 0,
+        "trial_duration" : 30
     },
     "video": {
         "height" : 455,
