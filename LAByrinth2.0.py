@@ -129,7 +129,6 @@ class processor(QObject):
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
         self.settings.sig.connect(self.update_settings)
-        self.trial_duration = float(.5)
         
     @pyqtSlot(dict)
     def update_settings(self, new_settings):
@@ -213,11 +212,12 @@ class processor(QObject):
     def stream_process_retention(self, frame):
         pose = self.dlc_live.get_pose(frame) 
         triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
-        self.out.write
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        node1 = self.return_pt2(30);node2 = self.return_pt2(-30)
+        cv2.arrowedLine(mod_frame, self.center, node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, node2, (255, 0, 0), 2)
         if(self.in_sector(pose[0,0], pose[0,1])
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
@@ -244,11 +244,12 @@ class processor(QObject):
     def stream_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
         triple_frame = np.dstack((frame, frame, frame));mod_frame = triple_frame.copy()
-        self.out.write
         for i in range(3):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        node1 = self.return_pt2(30);node2 = self.return_pt2(-30)
+        cv2.arrowedLine(mod_frame, self.center, node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, node2, (255, 0, 0), 2)
         if(self.in_sector(pose[0,0], pose[0,1])
             and self.in_sector(pose[1,0], pose[1,1])
             and self.in_sector(pose[2,0], pose[2,1])):
@@ -277,7 +278,7 @@ class processor(QObject):
     def in_sector(self, x, y):
         vec_1 = np.array([x, y])
         vec_2 = np.array((self.x_cen, self.y_cen))
-        diff = vec_2 - vec_1;theta = np.degrees(np.arctan2(diff[1], diff[0]))
+        diff = vec_1 - vec_2;theta = np.degrees(np.arctan2(diff[1], diff[0]))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
         upper = self.angle_center + 30; lower = self.angle_center - 30
         if (theta < upper and theta > lower):
@@ -318,6 +319,12 @@ class processor(QObject):
         running_time = time.perf_counter() - self.trial_start_time
         if not running_time < (self.trial_duration)*60:
             self.times_up.emit()
+    
+    def return_pt2(self, delta_angle):
+        start = np.array(self.center)
+        angle = self.angle_center + delta_angle
+        pt2 = self.center + 275*np.array((np.cos(np.radians(angle)), np.sin(np.radians(angle))))
+        return tuple(pt2.astype(int))
         
     
 
@@ -444,7 +451,7 @@ class QGB(QGridLayout):
         self.Xdim_vid = hslider('X dim:', 0, 582, 1000/20, h)
         self.Ydim_vid = hslider('Y dim:', 0, 582, 1000/20, w)
 
-        self.Xpos_vid = hslider('X pan:', 0, int(582 - h), 10, x_off)
+        self.Xpos_vid = hslider('X pan:', 0, int(780 - h), 10, x_off)
         self.Ypos_vid = hslider('Y pan:', 0, int(582 - w), 10, y_off)
 
         
@@ -456,13 +463,14 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
-        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(.5))
+        starting_trial_duration = self.settings.pull(('controls', 'trial_duration',))
+        self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(starting_trial_duration))
         es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
         return es_layout
 
     def cs_layout(self):
         cs_layout = QVBoxLayout()
-        r, s, c = self.settings.pull(('controls',)).values()
+        r, s, c, t_d = self.settings.pull(('controls',)).values()
 
         self.shock_setup = vslider('Shock Magnitude (mA/10, or 10^-4 A):', 1, 40, 1, s)
 
@@ -534,6 +542,7 @@ class Maze_Controller(QWidget,QObject):
     
         model_path = self.model_pathprompt()
         self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
+        self.update_trial_duration()
         self.create_threads();self.button_setup()
         self.disable_startandpreview_buttons()
         self.settings.sig.connect(self.update_settings)
@@ -676,9 +685,10 @@ class Maze_Controller(QWidget,QObject):
         b = self.grid.rotation_setup.sl.value()
         a = self.grid.shock_setup.sl.value()
         c = self.grid.sector_center.sl.value()
+        d = self.grid.trial_duration_widget.txt.text()
         self.processor.shockandrotation_setup(a, b)
         print(a, b)
-        self.settings.push_c((b, a, c))
+        self.settings.push_c((b, a, c, d))
         print('successfully pushed controls setup changes')
 
     def reenable_startandpreview_buttons(self):
@@ -690,7 +700,7 @@ class Maze_Controller(QWidget,QObject):
         self.grid.preview.setEnabled(False)
 
     def update_trial_duration(self):
-        self.processor.trial_duration = self.grid.trial_duration_widget.txt.text()
+        self.processor.trial_duration = float(self.grid.trial_duration_widget.txt.text())
         print('trial duration successfully updated.')
 
     @pyqtSlot()
