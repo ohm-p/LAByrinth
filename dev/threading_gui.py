@@ -18,8 +18,7 @@ class Processor(QObject):
         for i in range(1, 11):
             sleep(1)
             print(i)
-        # self.fin.emit()
-        print(self.thread() == self.main_thread)
+        # print(self.thread() == self.main_thread)
         self.thread().quit()
 
 
@@ -27,8 +26,7 @@ class Processor(QObject):
         for i in range(1, 11):
             sleep(2)
             print(10*i)
-        # self.fin.emit()
-        print(self.thread() == self.main_thread)
+        # print(self.thread() == self.main_thread)
         self.thread().quit()
 
 
@@ -36,8 +34,7 @@ class Processor(QObject):
         for i in range(1, 11):
             sleep(3)
             print(i**3)
-        # self.fin.emit()
-        print(self.thread() == self.main_thread)
+        # print(self.thread() == self.main_thread)
         self.thread().quit()
 
     def reset_thread(self):
@@ -82,21 +79,23 @@ class MazeGUI(QWidget):
         return layout
     
     def one(self):
-      
+        self.disable_buttons()
         self.processor.moveToThread(self.thread1)
-        self.thread1.started.connect(self.processor.func1)
+        self.thread1.started.connect(self.processor.func1);self.thread1.started.connect(self.disable_buttons)
         self.thread1.finished.connect(self.finished_confirmation);self.thread1.finished.connect(self.thread_done)
         self.thread1.start()
 
     def two(self):
+        self.disable_buttons()
         self.processor.moveToThread(self.thread2)
-        self.thread2.started.connect(self.processor.func2)
+        self.thread2.started.connect(self.processor.func2);self.thread2.started.connect(self.disable_buttons)
         self.thread2.finished.connect(self.finished_confirmation);self.thread2.finished.connect(self.thread_done)
         self.thread2.start()
 
     def three(self):
+        self.disable_buttons()
         self.processor.moveToThread(self.thread3)
-        self.thread3.started.connect(self.processor.func3)
+        self.thread3.started.connect(self.processor.func3);self.thread3.started.connect(self.disable_buttons)
         self.thread3.finished.connect(self.finished_confirmation);self.thread3.finished.connect(self.thread_done)
         self.thread3.start()
 
@@ -108,11 +107,23 @@ class MazeGUI(QWidget):
         thread.finished.connect(self.finished_confirmation)
         thread.start() 
 
-        print('thread successfully reset')
+        # print('thread successfully reset')
 
 
     def finished_confirmation(self):
-        print('thread successfully finished')
+        # print('thread successfully finished')
+        self.enable_buttons()
+    
+    def enable_buttons(self):
+        self.button1.setEnabled(True)
+        self.button2.setEnabled(True)
+        self.button3.setEnabled(True)
+
+    def disable_buttons(self):
+        self.button1.setEnabled(False)
+        self.button2.setEnabled(False)
+        self.button3.setEnabled(False)
+
 
 
 
