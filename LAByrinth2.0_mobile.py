@@ -7,6 +7,7 @@ from time import sleep
 
 from multiprocessing import Process
 from threading import Thread
+import random
 
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
@@ -75,37 +76,25 @@ class processor(QObject):
     pose_arr = pyqtSignal(np.ndarray)
     times_up = pyqtSignal()
     
-    def __init__(self, model_path, settings, main_thread):
+    def __init__(self, settings, main_thread):
         super().__init__()
-        self.main_thread = main_thread
-        if os.path.exists(model_path):
-            self.model_path = model_path
-        else:
-            sys.exit('error selecting the correct model.')
-        
+        self.main_thread = main_thread        
         self.settings = settings
         self._run_flag = False
         self.setup();print('camera successfully initiated')
-        grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
-        if grab.GrabSucceeded():
-            self.W = grab.Width
-            self.H = grab.Height
-        else:
-            sys.exit('init grab failed, please make sure the camera is connected')
-        # path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
-        path = "C:\\tracking_system\\_OHM\\vids\\"
+        path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
         self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
         self.path = path + self.dt + "\\"
         if not os.path.exists(self.path):
             os.makedirs(self.path)
-        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = int(30.0);frameSize = (self.H, self.W)
-        print(frameSize)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = int(30.0)
         vid_path = self.path +  self.dt + "_recording.avi"
         self.poses_path = self.path + self.dt + "_poses.npy"
         self.times_path = self.path + self.dt + "_times.txt"
         # self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
-        self.out = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'MJPG'), fps, frameSize)
         self.shock_on = False
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG');fps = 30.0;frameSize = self.vid.get(cv2.CAP_PROP_FRAME_WIDTH), self.vid.get(cv2.CAP_PROP_FRAME_HEIGHT);print(frameSize)
+        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.times = []
         self.poses = []
 
@@ -120,7 +109,7 @@ class processor(QObject):
 
         ###DLC setup
         self.dlc_processor = Processor()
-        self.dlc_live = DLCLive(self.model_path)
+        # self.dlc_live = DLCLive(self.model_path)
         self.marker_dims = (7,7)
 
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
@@ -153,19 +142,15 @@ class processor(QObject):
     def grab_stream(self):
         self.setup()
         self._run_flag = True
-        self.trial_start_time = time.perf_counter()
         while self._run_flag:
-            grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
-            if grab.GrabSucceeded():
-                frame = grab.Array
-                mod_frame = self.stream_process(frame)
+            ret, frame = self.vid.read()
+            if ret:
+                mod_frame = self.mobile_process(frame)
                 self.frm.emit(mod_frame)
             else:
                 sys.exit('cam failed to cap frame')
-                break
             self.check_time()
-        grab.Release()
-        self.vid.Close()
+        self.vid.release()
         self.thread().quit()
 
     def model_startup(self):
@@ -194,13 +179,15 @@ class processor(QObject):
         self.setup()
 
     def setup(self):
-        self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
-        self.res = np.array((self.w, self.h))
-        self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
-        self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
-        self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
-        self.vid.PixelFormat.SetValue("Mono8")
-        self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+        try:
+            self.h, self.w, self.x_off, self.y_off, self.x_cen, self.y_cen = self.settings.pull(('video',)).values()
+            self.res = np.array((self.w, self.h))
+            print('params successfully pulled (not used)')
+        except:
+            print('failed to pull params from .settings file')
+        self.vid = cv2.VideoCapture(0)
+        if not self.vid.isOpened():
+            self.vid.open(0)
 
     def idle_process(self, frame):
         pose = self.dlc_live.get_pose(frame) 
@@ -211,7 +198,17 @@ class processor(QObject):
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
         self.pose_arr.emit(pose)
         print(pose.shape)
-        return mod_frame      
+        return mod_frame    
+    
+    def mobile_process(self, frame):
+        mod_frame = frame.copy()
+        cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
+        self.out.write(frame)
+        self.pose_arr.emit(self.rand_pose())
+        for i in range(3):
+            coords = (int(self.pose[i, 0]), int(self.pose[i, 1]))
+            cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
+        return mod_frame  
 
     def stream_process_retention(self, frame):
         pose = self.dlc_live.get_pose(frame) 
@@ -329,6 +326,14 @@ class processor(QObject):
         angle = self.angle_center + delta_angle
         pt2 = self.center + 275*np.array((np.cos(np.radians(angle)), np.sin(np.radians(angle))))
         return tuple(pt2.astype(int))
+
+    def rand_pose(self):
+        lis = []
+        for i in range(3):
+            current = [int(random.randint(0, 500)), int(random.randint(0, 500)), random.random()]
+            lis.append(current)
+        self.pose = np.array(lis)   
+        return(self.pose)
         
     
 
@@ -544,14 +549,15 @@ class Maze_Controller(QWidget,QObject):
         self.wdir = os.path.dirname(os.path.realpath(__file__))
         self.grid.change_filepath.clicked.connect(self.pathprompt)
     
-        model_path = self.model_pathprompt()
-        self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
+        self.processor = processor(settings = self.settings, main_thread = self.main_thread)
+
+
         self.update_trial_duration()
         self.create_threads();self.button_setup()
         self.disable_startandpreview_buttons()
         self.settings.sig.connect(self.update_settings)
         self.setLayout(self.main_layout)
-        self.model_startup()
+        # self.model_startup()
 
 
     @pyqtSlot(dict)
@@ -647,13 +653,10 @@ class Maze_Controller(QWidget,QObject):
     def shutdown_routine(self):
         #add all shutdown commands here
         self.processor._run_flag = False
-        self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
         self.processor.out.release();print('video successfully saved')
         self.settings.save_settings_func()
-        np.save(self.processor.poses_path, self.processor.poses)
-        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
         print('data successfully saved')
         # self.close()
         sys.exit('shutdown routine activated')    

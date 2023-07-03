@@ -173,9 +173,6 @@ class processor(QObject):
         grab = self.vid.RetrieveResult(1000, pylon.TimeoutHandling_ThrowException)
         if grab.GrabSucceeded():
             frame = grab.Array
-            print(frame)
-            print(frame.shape)
-
             pose = self.dlc_live.init_inference(frame)
             mod_frame = np.dstack((frame, frame, frame))
             for i in range(3):
@@ -199,7 +196,6 @@ class processor(QObject):
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
-        self.vid.PixelFormat.SetValue("Mono8")
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
     def idle_process(self, frame):
@@ -347,7 +343,6 @@ class textbox(QWidget):
 
         self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt)
         self.setLayout(self.layout)
-
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -646,15 +641,16 @@ class Maze_Controller(QWidget,QObject):
 
     def shutdown_routine(self):
         #add all shutdown commands here
+        np.save(self.processor.poses_path, self.processor.poses)
+        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
+        print('data successfully saved')
         self.processor._run_flag = False
         self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
         self.processor.out.release();print('video successfully saved')
         self.settings.save_settings_func()
-        np.save(self.processor.poses_path, self.processor.poses)
-        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
-        print('data successfully saved')
+
         # self.close()
         sys.exit('shutdown routine activated')    
     

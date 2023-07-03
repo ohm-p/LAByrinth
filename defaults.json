@@ -7,12 +7,12 @@
         "trial_duration" : 30
     },
     "video": {
-        "height" : 455,
-        "width" : 455,
-        "x_offset" : 118,
-        "y_offset" : 62,
-        "x_center":223,
-        "y_center":223  
+        "height" : 460,
+        "width" : 460,
+        "x_offset" : 140,
+        "y_offset" : 45,
+        "x_center":230,
+        "y_center":230  
     }
     
     }
