@@ -1,6 +1,6 @@
 from dlclive import DLCLive, Processor
 import numpy as np
-import serial, cv2, sys, os, json, pickle
+import serial, cv2, sys, os, json, pickle, glob
 from pypylon import pylon, genicam
 import time
 from time import sleep
@@ -75,7 +75,7 @@ class processor(QObject):
     pose_arr = pyqtSignal(np.ndarray)
     times_up = pyqtSignal()
     
-    def __init__(self, model_path, settings, main_thread):
+    def __init__(self, model_path, project_path, settings, main_thread):
         super().__init__()
         self.main_thread = main_thread
         if os.path.exists(model_path):
@@ -83,6 +83,19 @@ class processor(QObject):
         else:
             sys.exit('error selecting the correct model.')
         
+        if os.path.exists(project_path):
+            os.chdir(project_path)
+            subdircount = len(glob.glob('**'))
+            if subdircount < 3:
+                os.makedirs(f'trial {subdircount+1}')
+            elif subdircount > 4:
+                os.makedirs('retention')
+            else:
+                os.exit('more than 4 subdirs in the selected project, try again!')
+        else:
+            os.chdir(os.path.dirname)
+            os.makedirs(os.path.basename(project_path))
+
         self.settings = settings
         self._run_flag = False
         self.setup();print('camera successfully initiated')
@@ -326,16 +339,15 @@ class processor(QObject):
         pt2 = self.center + 275*np.array((np.cos(np.radians(angle)), np.sin(np.radians(angle))))
         return tuple(pt2.astype(int))
         
-    
 
 class textbox(QWidget):
-    def __init__(self, wname, startval, orientation = Qt.Orientation.Horizontal):
+    def __init__(self, wname:str, startval, orientation = Qt.Orientation.Horizontal):
         super().__init__()
 
         self.name = wname
         self.layout = QHBoxLayout()
         self.lbl = QLabel(alignment = Qt.AlignmentFlag.AlignVCenter, text = f'{self.name}')
-        self.lbl.setFixedWidth(150)
+        self.lbl.setFixedWidth(400)
 
         self.txt = QLineEdit(alignment = Qt.AlignmentFlag.AlignCenter, text = f'{startval}')
         self.txt.setValidator(QDoubleValidator(bottom = float(0), decimals = 1, top = 60))
@@ -343,6 +355,23 @@ class textbox(QWidget):
 
         self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt)
         self.setLayout(self.layout)
+
+
+class textbutton(QWidget):
+    def __init__(self, varname:str, orientation = Qt.Orientation.Horizontal):
+        super().__init__()
+
+        self.varname = varname
+        self.pathname = None
+        self.layout = QHBoxLayout()
+        self.main_lbl = QLabel(alignment = Qt.AlignmentFlag.AlignVCenter, text = f'{self.varname} selected:')
+        self.button = QPushButton(text = f'click here to select {self.varname}')
+        self.path_text = QPlainTextEdit();self.path_text.setPlainText(self.pathname)
+        self.path_text.setMaximumHeight(100)
+        self.path_text.setReadOnly(True)
+        self.layout.addWidget(self.button);self.layout.addWidget(self.main_lbl);self.layout.addWidget(self.path_text)
+        self.setLayout(self.layout)
+
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -353,18 +382,18 @@ class hslider(QWidget):
         self.start = startval
 
         self.lbl = QLabel(alignment = Qt.AlignmentFlag.AlignLeft, text = f'{self.name}')
-        self.lbl.setFixedWidth(50)
+        self.lbl.setFixedWidth(100)
 
 
         self.txt = QLineEdit(alignment = Qt.AlignmentFlag.AlignCenter, text = f'{self.start}')
         self.txt.setValidator(QIntValidator((smin-1), (smax+1)))
-        self.txt.setFixedWidth(50)
+        self.txt.setFixedWidth(100)
         self.txt.editingFinished.connect(self.text_updates_slider)
 
 
         self.sl = QSlider(orientation)
         self.sl.setMinimum(smin);self.sl.setMaximum(smax);self.sl.setTickInterval(int(sstep));self.sl.setTickPosition(QSlider.TickPosition(3));self.sl.setValue(self.start)
-        self.sl.setFixedWidth(200)
+        self.sl.setFixedWidth(250)
         self.sl.valueChanged.connect(self.slider_updates_text)
 
         self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt);self.layout.addWidget(self.sl)
@@ -420,8 +449,6 @@ class QGB(QGridLayout):
         #video setup
         self.push_vschanges = QPushButton(text = f'Push \'{self.groups[0]}\' Changes?')
         #experiment setup 
-        self.change_filepath = QPushButton(text = 'click here to select filepath')
-        self.path_label = QLabel(text = 'please select filepath (none selected)')
         self.push_eschanges = QPushButton(text = f'Push \'{self.groups[1]}\' Changes?')
         #controls setup
         self.push_cschanges = QPushButton(text = f'Push \'{self.groups[2]}\' Changes?')
@@ -462,9 +489,11 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
+        self.projectpath_widget = textbutton('project path')
+        self.modelpath_widget = textbutton('model path')
         starting_trial_duration = self.settings.pull(('controls', 'trial_duration',))
         self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(starting_trial_duration))
-        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
+        es_layout.addWidget(self.projectpath_widget);es_layout.addWidget(self.modelpath_widget);es_layout.addWidget(self.trial_duration_widget)#;es_layout.addWidget(self.push_eschanges)
         return es_layout
 
     def cs_layout(self):
@@ -537,10 +566,10 @@ class Maze_Controller(QWidget,QObject):
         # self.tabs.addTab(self.livestream, 'livestream')
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
-        self.grid.change_filepath.clicked.connect(self.pathprompt)
     
-        model_path = self.model_pathprompt()
-        self.processor = processor(model_path = model_path, settings = self.settings, main_thread = self.main_thread)
+        self.model_pathprompt()
+        self.project_pathprompt()
+        self.processor = processor(model_path = self.model_path, project_path = self.wdir, settings = self.settings, main_thread = self.main_thread)
         self.update_trial_duration()
         self.create_threads();self.button_setup()
         self.disable_startandpreview_buttons()
@@ -561,31 +590,34 @@ class Maze_Controller(QWidget,QObject):
     def button_setup(self):
         self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
         self.grid.push_cschanges.clicked.connect(self.push_controlssetup_changes)
-        self.grid.push_eschanges.clicked.connect(self.pathprompt)
+        self.grid.push_eschanges.clicked.connect(self.project_pathprompt)
         self.grid.savesettings.clicked.connect(self.settings.save_settings_func)
         self.grid.start.clicked.connect(self.main_processing)
         self.grid.preview.clicked.connect(self.preview)
         self.grid.stop.clicked.connect(self.shutdown_routine)
-        self.grid.change_filepath.clicked.connect(self.pathprompt)
         self.grid.start.clicked.connect(self.disable_startandpreview_buttons);self.grid.preview.clicked.connect(self.disable_startandpreview_buttons)
+        self.grid.projectpath_widget.button.clicked.connect(self.project_pathprompt)
+        self.grid.modelpath_widget.button.clicked.connect(self.model_pathprompt)
         self.processor.pose_arr.connect(self.update_pose_table)
         self.grid.trial_duration_widget.txt.editingFinished.connect(self.update_trial_duration)
         self.processor.frm.connect(self.display_frame)
         self.processor.times_up.connect(self.shutdown_routine)
 
-    def pathprompt(self):
+    def project_pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
         dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
-        file = dlg.getOpenFileName(caption='select the working directory for your project');fname = file[0]
-        self.wdir = fname
-        msg = f'the working directory is: \"{str(fname)}\"'
-        self.grid.path_label.setText(msg)
+        file = dlg.getExistingDirectory(caption='select the folder corresponding to the \'animal\' that your project is currently in')
+        self.wdir = file
+        self.grid.projectpath_widget.path_text.setPlainText(self.wdir)
+        print(f'wdir changed to: \'{self.wdir}\'')
 
     def model_pathprompt(self):
         model_options = QFileDialog.Option.ShowDirsOnly
         model_dlg = QFileDialog();model_dlg.setOptions(model_options);model_dlg.setFileMode(QFileDialog.FileMode.Directory)
         model_path = model_dlg.getExistingDirectory(caption='select the directory of the exported model that you will be using')
-        return model_path
+        self.model_path = model_path
+        self.grid.modelpath_widget.path_text.setPlainText(self.model_path)
+        print(f'model_path changed to: \'{self.model_path}\'')
 
     def main_processing(self):
         #commands and pushing new settings
@@ -641,16 +673,15 @@ class Maze_Controller(QWidget,QObject):
 
     def shutdown_routine(self):
         #add all shutdown commands here
-        np.save(self.processor.poses_path, self.processor.poses)
-        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
-        print('data successfully saved')
         self.processor._run_flag = False
         self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
         self.processor.vid.Close()
         self.processor.out.release();print('video successfully saved')
         self.settings.save_settings_func()
-
+        np.save(self.processor.poses_path, self.processor.poses)
+        np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
+        print('data successfully saved')
         # self.close()
         sys.exit('shutdown routine activated')    
     

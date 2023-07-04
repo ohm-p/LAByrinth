@@ -338,7 +338,7 @@ class processor(QObject):
     
 
 class textbox(QWidget):
-    def __init__(self, wname, startval, orientation = Qt.Orientation.Horizontal):
+    def __init__(self, wname:str, startval, orientation = Qt.Orientation.Horizontal):
         super().__init__()
 
         self.name = wname
@@ -353,6 +353,20 @@ class textbox(QWidget):
         self.layout.addWidget(self.lbl);self.layout.addWidget(self.txt)
         self.setLayout(self.layout)
 
+
+class textbutton(QWidget):
+    def __init__(self, varname:str, orientation = Qt.Orientation.Horizontal):
+        super().__init__()
+
+        self.varname = varname
+        self.pathname = None
+        self.layout = QHBoxLayout()
+        self.main_lbl = QLabel(alignment = Qt.AlignmentFlag.AlignVCenter, text = f'{self.varname} selected:')
+        self.button = QPushButton(text = f'click here to select {self.varname}')
+        self.path_text = QPlainTextEdit(alignment = Qt.AlignmentFlag.AlignVCenter, text = str(self.pathname))
+        self.path_text.setReadOnly(True)
+        self.layout.addWidget(self.button);self.layout.addWidget(self.main_lbl);self.layout.addWidget(self.path_text)
+        
 
 class hslider(QWidget):
     def __init__(self, sname, smin:int, smax:int, sstep:float, startval, orientation = Qt.Orientation.Horizontal):
@@ -430,7 +444,7 @@ class QGB(QGridLayout):
         #video setup
         self.push_vschanges = QPushButton(text = f'Push \'{self.groups[0]}\' Changes?')
         #experiment setup 
-        self.change_filepath = QPushButton(text = 'click here to select filepath')
+        self.change_project_filepath = QPushButton(text = 'click here to select filepath')
         self.path_label = QLabel(text = 'please select filepath (none selected)')
         self.push_eschanges = QPushButton(text = f'Push \'{self.groups[1]}\' Changes?')
         #controls setup
@@ -472,9 +486,13 @@ class QGB(QGridLayout):
     
     def es_layout(self):
         es_layout = QVBoxLayout()
+        self.projectpath_widget = textbutton('project path')
+        self.projectpath_widget.button.clicked.connect(self.change_project_filepath)
+        self.modelpath_widget = textbutton('model path')
+        self.projectpath_widget.button.clicked.connect(self.project)
         starting_trial_duration = self.settings.pull(('controls', 'trial_duration',))
         self.trial_duration_widget = textbox('Enter the duration of the trial (in minutes):', startval = float(starting_trial_duration))
-        es_layout.addWidget(self.change_filepath);es_layout.addWidget(self.path_label);es_layout.addWidget(self.push_eschanges);es_layout.addWidget(self.trial_duration_widget)
+        es_layout.addWidget(self.projectpath_widget);es_layout.addWidget(self.modelpath_widget);es_layout.addWidget(self.trial_duration_widget)#;es_layout.addWidget(self.push_eschanges)
         return es_layout
 
     def cs_layout(self):
@@ -547,7 +565,7 @@ class Maze_Controller(QWidget,QObject):
         # self.tabs.addTab(self.livestream, 'livestream')
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
-        self.grid.change_filepath.clicked.connect(self.pathprompt)
+        self.grid.change_project_filepath.clicked.connect(self.pathprompt)
     
         self.processor = processor(settings = self.settings, main_thread = self.main_thread)
 
@@ -572,19 +590,18 @@ class Maze_Controller(QWidget,QObject):
     def button_setup(self):
         self.grid.push_vschanges.clicked.connect(self.push_videosetup_changes)
         self.grid.push_cschanges.clicked.connect(self.push_controlssetup_changes)
-        self.grid.push_eschanges.clicked.connect(self.pathprompt)
+        self.grid.push_eschanges.clicked.connect(self.project_pathprompt)
         self.grid.savesettings.clicked.connect(self.settings.save_settings_func)
         self.grid.start.clicked.connect(self.main_processing)
         self.grid.preview.clicked.connect(self.preview)
         self.grid.stop.clicked.connect(self.shutdown_routine)
-        self.grid.change_filepath.clicked.connect(self.pathprompt)
         self.grid.start.clicked.connect(self.disable_startandpreview_buttons);self.grid.preview.clicked.connect(self.disable_startandpreview_buttons)
         self.processor.pose_arr.connect(self.update_pose_table)
         self.grid.trial_duration_widget.txt.editingFinished.connect(self.update_trial_duration)
         self.processor.frm.connect(self.display_frame)
         self.processor.times_up.connect(self.shutdown_routine)
 
-    def pathprompt(self):
+    def project_pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
         dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
         file = dlg.getOpenFileName(caption='select the working directory for your project');fname = file[0]
