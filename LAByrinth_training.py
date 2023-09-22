@@ -87,14 +87,18 @@ class processor(QObject):
             os.chdir(project_path)
             subdircount = len(glob.glob('**'))
             if subdircount < 3:
-                os.makedirs(f'trial {subdircount+1}')
-            elif subdircount > 4:
-                os.makedirs('retention')
+                self.trial_dir_name = f'trial{subdircount+1}' 
+            elif subdircount < 4:
+                self.trial_dir_name = f'retention'
             else:
                 os.exit('more than 4 subdirs in the selected project, try again!')
+            os.makedirs(self.trial_dir_name);os.chdir(self.trial_dir_name)
+            self.path = os.getcwd() + f'\\{self.trial_dir_name}'
+
         else:
-            os.chdir(os.path.dirname)
-            os.makedirs(os.path.basename(project_path))
+            os.exit('selected project path no longer exists. shutdown activated')
+            # os.chdir(os.path.dirname)
+            # os.makedirs(os.path.basename(project_path))
 
         self.settings = settings
         self._run_flag = False
@@ -106,18 +110,18 @@ class processor(QObject):
         else:
             sys.exit('init grab failed, please make sure the camera is connected')
         # path = "C:\\Users\\ohmkp\\OneDrive\\Desktop\\vids\\"
-        path = "C:\\tracking_system\\_OHM\\vids\\"
-        self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
-        self.path = path + self.dt + "\\"
-        if not os.path.exists(self.path):
-            os.makedirs(self.path)
-        fourcc = cv2.VideoWriter_fourcc(*'XVID');fps = int(30.0);frameSize = (self.H, self.W)
+        # path = "C:\\tracking_system\\_OHM\\vids\\"
+        # self.dt = time.strftime(r"d%y.%m.%d_t%H.%M")
+        # self.path = path + self.dt + "\\"
+        # if not os.path.exists(self.path):
+        #     os.makedirs(self.path)
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG');fps = int(30.0);frameSize = (self.H, self.W)
         print(frameSize)
-        vid_path = self.path +  self.dt + "_recording.avi"
-        self.poses_path = self.path + self.dt + "_poses.npy"
-        self.times_path = self.path + self.dt + "_times.txt"
+        vid_path = self.path + "_recording.avi"
+        self.poses_path = self.path + "_poses.npy"
+        self.times_path = self.path + "_times.txt"
         # self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
-        self.out = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'MJPG'), fps, frameSize)
+        self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.shock_on = False
         self.times = []
         self.poses = []
@@ -209,6 +213,8 @@ class processor(QObject):
         self.vid = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice());self.vid.Open()
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
+        self.vid.PixelFormat.SetValue("Mono8")
+        # self.vid.AcquisitionFrameRateEnable.SetValue(True);self.vid.AcquisitionFrameRate.SetValue(30.0)
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
     def idle_process(self, frame):
@@ -248,7 +254,8 @@ class processor(QObject):
                     self.shock_on = False
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
-                    self.times.append([self.end_time, diff])
+                    relative_time = self.end_shock - self.trial_start_time
+                    self.times.append([relative_time, diff])
         self.out.write(triple_frame)
         self.poses.append(pose)
         self.pose_arr.emit(pose)
@@ -567,6 +574,8 @@ class Maze_Controller(QWidget,QObject):
 
         self.wdir = os.path.dirname(os.path.realpath(__file__))
     
+        self.default_project_path = r"C:\tracking_system\_OHM\projects__epoch7.5.23"
+        self.default_model_path = r"C:\tracking_system\_OHM\exported-models"
         self.model_pathprompt()
         self.project_pathprompt()
         self.processor = processor(model_path = self.model_path, project_path = self.wdir, settings = self.settings, main_thread = self.main_thread)
@@ -606,7 +615,7 @@ class Maze_Controller(QWidget,QObject):
     def project_pathprompt(self):
         options = QFileDialog.Option.ShowDirsOnly
         dlg = QFileDialog();dlg.setOptions(options);dlg.setFileMode(QFileDialog.FileMode.Directory)
-        file = dlg.getExistingDirectory(caption='select the folder corresponding to the \'animal\' that your project is currently in')
+        file = dlg.getExistingDirectory(directory = self.default_project_path, caption='PROJECT (\'animal\') directory selection')
         self.wdir = file
         self.grid.projectpath_widget.path_text.setPlainText(self.wdir)
         print(f'wdir changed to: \'{self.wdir}\'')
@@ -614,7 +623,7 @@ class Maze_Controller(QWidget,QObject):
     def model_pathprompt(self):
         model_options = QFileDialog.Option.ShowDirsOnly
         model_dlg = QFileDialog();model_dlg.setOptions(model_options);model_dlg.setFileMode(QFileDialog.FileMode.Directory)
-        model_path = model_dlg.getExistingDirectory(caption='select the directory of the exported model that you will be using')
+        model_path = model_dlg.getExistingDirectory(directory = self.default_model_path, caption='MODEL directory selection')
         self.model_path = model_path
         self.grid.modelpath_widget.path_text.setPlainText(self.model_path)
         print(f'model_path changed to: \'{self.model_path}\'')
@@ -676,12 +685,13 @@ class Maze_Controller(QWidget,QObject):
         self.processor._run_flag = False
         self.processor.write_command(3);self.processor.write_command(6)
         self.stream_thread.quit();self.preview_thread.quit();self.model_startup_thread.quit()
-        self.processor.vid.Close()
-        self.processor.out.release();print('video successfully saved')
-        self.settings.save_settings_func()
         np.save(self.processor.poses_path, self.processor.poses)
         np.savetxt(self.processor.times_path, self.processor.times, delimiter = ', ', fmt = '%s')
         print('data successfully saved')
+        self.processor.vid.Close()
+        self.processor.out.release();print('video successfully saved')
+        self.settings.save_settings_func()
+ 
         # self.close()
         sys.exit('shutdown routine activated')    
     
@@ -736,6 +746,7 @@ class Maze_Controller(QWidget,QObject):
 
     @pyqtSlot()
     def save_settings(self):
+        os.chdir(os.path.dirname(__file__))
         if os.path.exists('./settings.json'):
             with open('settings.json', 'w') as outfile:
                 json.dump(self.settings.settings, outfile)
