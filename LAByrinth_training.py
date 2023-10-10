@@ -158,6 +158,7 @@ class processor(QObject):
         if grab.GrabSucceeded():
             self.W = grab.Width
             self.H = grab.Height
+            
             frame = grab.Array
             mod_frame = self.idle_process(frame)
             self.frm.emit(mod_frame)

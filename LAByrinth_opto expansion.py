@@ -2,6 +2,7 @@ from dlclive import DLCLive, Processor
 import numpy as np
 import serial, cv2, sys, os, json, pickle, glob
 from pypylon import pylon, genicam
+from daqmx import NIDAQmxInstrument
 import time
 from time import sleep
 
@@ -119,11 +120,13 @@ class processor(QObject):
         print(frameSize)
         vid_path = self.path + "_recording.avi"
         self.poses_path = self.path + "_poses.npy"
-        self.times_path = self.path + "_times.txt"
+        self.shock_times_path = self.path + "_times.txt"
         # self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.out = cv2.VideoWriter(vid_path, fourcc, fps, frameSize)
         self.shock_on = False
-        self.times = []
+        self.TTL_on = False
+        self.shock_times = []
+        self.TTL_times = []
         self.poses = []
 
         self.commands = [[0x01, None], #1: rotation setup: default counter clockwise, 4-100rpm
@@ -142,6 +145,7 @@ class processor(QObject):
 
         self.ser = serial.Serial();self.ser.port= 'COM5';self.ser.baudrate = 115200   
         self.ser.open()
+        self.inst = NIDAQmxInstrument(model_number = 'USB-6001')
         self.colors = [(0,255,171), (171,0,255), (212, 255,0)]
         self.center = (self.settings.pull(('video', 'x_center',)), self.settings.pull(('video', 'y_center',)))
         self.angle_center = self.settings.pull(('controls', 'sector_center'))
@@ -158,6 +162,7 @@ class processor(QObject):
         if grab.GrabSucceeded():
             self.W = grab.Width
             self.H = grab.Height
+            
             frame = grab.Array
             mod_frame = self.idle_process(frame)
             self.frm.emit(mod_frame)
@@ -214,7 +219,7 @@ class processor(QObject):
         self.vid.Width.SetValue(self.w);self.vid.Height.SetValue(self.h)
         self.vid.OffsetX.SetValue(self.x_off);self.vid.OffsetY.SetValue(self.y_off)
         self.vid.PixelFormat.SetValue("Mono8")
-        self.vid.AcquisitionFrameRateEnable.SetValue(True);self.vid.AcquisitionFrameRate.SetValue(30.0)
+        # self.vid.AcquisitionFrameRateEnable.SetValue(True);self.vid.AcquisitionFrameRate.SetValue(30.0)
         self.vid.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
     def idle_process(self, frame):
@@ -255,7 +260,7 @@ class processor(QObject):
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
                     relative_time = self.end_shock - self.trial_start_time
-                    self.times.append([relative_time, diff])
+                    self.shock_times.append([relative_time, diff])
         self.out.write(triple_frame)
         self.poses.append(pose)
         self.pose_arr.emit(pose)
@@ -268,19 +273,21 @@ class processor(QObject):
             coords = (int(pose[i, 0]), int(pose[i, 1]))
             cv2.ellipse(mod_frame, (coords, self.marker_dims, 0), self.colors[i], -1)
         cv2.ellipse(mod_frame, (self.center, (13,13), 0), (0,0,0), -1)
-        node1 = self.return_pt2(30);node2 = self.return_pt2(-30)
-        cv2.arrowedLine(mod_frame, self.center, node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, node2, (255, 0, 0), 2)
-        if(self.in_sector(pose[0,0], pose[0,1])
-            and self.in_sector(pose[1,0], pose[1,1])
-            and self.in_sector(pose[2,0], pose[2,1])):
+        shock_node1 = self.return_pt2(30);shock_node2 = self.return_pt2(-30);TTL_node1 = self.return_pt2(45);TTL_node2 = self.return_pt2(-45)
+        cv2.arrowedLine(mod_frame, self.center, shock_node1, (255, 0, 0), 2);cv2.arrowedLine(mod_frame, self.center, shock_node2, (255, 0, 0), 2)
+        cv2.arrowedLine(mod_frame, self.center, TTL_node1, (0, 0, 255), 2);cv2.arrowedLine(mod_frame, self.center, TTL_node2, (0, 0, 255), 2)
+        
+        #this part is for delivering the shock -- must be retained in this function for now so that array does not have to be passed between functions
+        if(self.in_sector(pose[0,0], pose[0,1], 30)
+            and self.in_sector(pose[1,0], pose[1,1], 30)
+            and self.in_sector(pose[2,0], pose[2,1], 30)):
                 #the subject is in the sector, so shock is delivered (turned on if off)
                 cv2.ellipse(mod_frame, ((15, 15), (10, 10), 0), (255, 0, 0), -1)
                 if not self.shock_on:
                     self.ser.write(self.command(5))
                     self.start_shock = time.perf_counter()
                     self.start_time = time.perf_counter() - self.trial_start_time
-                    self.shock_on = True
-                                
+                    self.shock_on = True        
         else:
                 #shock is not delivered since the subject is not in the sector (turned off if on)
                 if self.shock_on:
@@ -289,22 +296,57 @@ class processor(QObject):
                     self.shock_on = False
                     #notes the time that the shock ended, subtracts from start and adds to the array
                     diff = self.end_shock - self.start_shock
-                    self.times.append([self.start_time, diff])
+                    self.shock_times.append([self.start_time, diff])
+
+
+        # this part is for delivering the TTL pulse to the laser, thereby activating it
+        if(self.in_sector(pose[0,0], pose[0,1], 45)
+            and self.in_sector(pose[1,0], pose[1,1], 45)
+            and self.in_sector(pose[2,0], pose[2,1], 45)):
+                #the subject is in the sector, so shock is delivered (turned on if off)
+                cv2.ellipse(mod_frame, ((35, 15), (10, 10), 0), (0, 0, 255), -1)
+                if not self.TTL_on:
+                    
+                    self.inst.ao0 = 10
+
+                    self.start_TTL = time.perf_counter()
+                    self.start_time = time.perf_counter() - self.trial_start_time
+                    self.TTL_on = True        
+        else:
+                #shock is not delivered since the subject is not in the sector (turned off if on)
+                if self.TTL_on:
+
+                    self.inst.ao0 = 0
+                                     
+                    self.end_TTL = time.perf_counter()
+                    self.TTL_on = False
+                    #notes the time that the shock ended, subtracts from start and adds to the array
+                    diff = self.end_TTL - self.start_TTL
+                    self.TTL_times.append([self.start_time, diff])
+        
+        
         self.out.write(triple_frame)
         self.poses.append(pose)
         self.pose_arr.emit(pose)
         return mod_frame        
 
-    def in_sector(self, x, y):
+    def in_sector(self, x, y, delta):
         vec_1 = np.array([x, y])
         vec_2 = np.array((self.x_cen, self.y_cen))
         diff = vec_1 - vec_2;theta = np.degrees(np.arctan2(diff[1], diff[0]))
         # true if calculated theta is in the 60 degree sector from centered around the value pulled from settings
-        upper = self.angle_center + 30; lower = self.angle_center - 30
+        upper = self.angle_center + delta; lower = self.angle_center - delta
         if (theta < upper and theta > lower):
             #boolean output for the shock function
             return True
         
+
+    def process_shock(self, params):
+        pass
+
+    def process_opto(self, params):
+        pass
+
     # simplified command function, see previous version for legacy (eliminated 5 other commands and simplified process)
     def command(self, inp):
          d2, d3 = self.commands[int(inp) - 1]
@@ -338,7 +380,7 @@ class processor(QObject):
     def check_time(self):
         running_time = time.perf_counter() - self.trial_start_time
         if not running_time < (self.trial_duration)*60:
-            self.times_up.emit()
+            self.shock_times_up.emit()
     
     def return_pt2(self, delta_angle):
         start = np.array(self.center)
@@ -765,4 +807,3 @@ if __name__ == '__main__':
     Maze = Maze_Controller()
     Maze.show()
     app.exec()
-    
